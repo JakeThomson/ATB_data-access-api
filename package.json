@@ -1,0 +1,26 @@
+{
+  "name": "atb_data-access-api",
+  "version": "0.1.0",
+  "description": "The data access layer for the algorithmic trading bot project.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JakeThomson/ATB_data-access-api.git"
+  },
+  "author": "Jake Thomson",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/JakeThomson/ATB_data-access-api/issues"
+  },
+  "homepage": "https://github.com/JakeThomson/ATB_data-access-api#readme",
+  "dependencies": {
+    "express": "^4.17.1"
+  },
+  "devDependencies": {
+    "eslint": "^7.21.0"
+  }
+}
