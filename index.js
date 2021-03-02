@@ -1,13 +1,14 @@
+const packageJson = require('./package.json');
 const express = require('express');
 const app = express();
 
-app.get('/', (req, res) => {
-  res.send('Hello World!');
+const app = express();
+const port = 8080;
+
+const server = app.listen(port, () => {
+  console.log(`App server now listening to port ${port}`);
 });
 
-const server = app.listen(8080, () => {
-  const host = server.address().address;
-  const port = server.address().port;
-
-  console.log(`Example app listening at http://${host}:${port}`);
+app.get('/', (req, res) => {
+  res.send(`Jake's trading api (version: ${packageJson.version})`);
 });
