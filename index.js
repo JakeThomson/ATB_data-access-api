@@ -27,10 +27,10 @@ app.get('/', (req, res) => {
   res.send(`Jake's trading api (version: ${packageJson.version})`);
 });
 
-// Listen for PUT requests to /simulation_properties/initialise and re-initialise the simulation properties.
-app.put('/simulation_properties/initialise', (req, res) => {
+// Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
+app.put('/backtest_properties/initialise', (req, res) => {
   // Extract data from request body.
-  const { simulation_date: simulationDate, start_balance: startBalance } = req.body;
+  const { backtest_date: backtestDate, start_balance: startBalance } = req.body;
 	
 	const totalBalance = startBalance,
 				availableBalance = startBalance,
@@ -39,25 +39,48 @@ app.put('/simulation_properties/initialise', (req, res) => {
 				isPaused = false,
 				totalProfitLossGraph = JSON.stringify({"graph":"placeholder"})
 
-	// Query constructor to update the simulation properties.
+	// Query constructor to update the backtest properties.
 	pool.query(`
-		UPDATE simulation_properties
-		SET
-		simulation_date = ?,
-		start_balance = ?,
-		total_balance = ?,
-		available_balance = ?,
-		total_profit_loss_value = ?,
-		total_profit_loss_percentage = ?,
-		is_paused = ?,
-		total_profit_loss_graph = ?`, 
-		[simulationDate, startBalance, totalBalance, availableBalance, totalProfitLossValue, 
+		UPDATE backtest_properties
+		  SET
+        backtest_date = ?,
+        start_balance = ?,
+        total_balance = ?,
+        available_balance = ?,
+        total_profit_loss_value = ?,
+        total_profit_loss_percentage = ?,
+        is_paused = ?,
+        total_profit_loss_graph = ?`, 
+		[backtestDate, startBalance, totalBalance, availableBalance, totalProfitLossValue, 
 			totalProfitLossPercentage, isPaused, totalProfitLossGraph], (err, row) => {
 			if(err) {
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 				delete err.stack;
-				console.log(new Date(), err);
+				console.warn(new Date(), err);
+			} else {
+				// Valid and successful request.
+				res.send(row);
+			}
+	});
+})
+
+// Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
+app.patch('/backtest_properties/date', (req, res) => {
+  // Extract data from request body.
+  const { backtest_date: backtestDate } = req.body;
+
+	// Query constructor to update the backtest properties.
+	pool.query(`
+		UPDATE backtest_properties
+		  SET
+		    backtest_date = ?`, 
+		[backtestDate], (err, row) => {
+			if(err) {
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+				delete err.stack;
+				console.warn(new Date(), err);
 			} else {
 				// Valid and successful request.
 				res.send(row);
