@@ -1,24 +1,22 @@
 const express = require('express');
+const app = express();
+const http = require('http').createServer(app);
+const io = require('socket.io')(http, { cors: { origin: ['http://localhost:3000', 'http://localhost:5000', 'https://algo-trader.jake-t.codes'], } });
 const mysql = require('mysql');
 const bodyParser = require('body-parser');
 const socket = require('socket.io');
 const moment = require('moment');
 const packageJson = require('./package.json');
 
-const app = express();
 const port = 8080;
 
-const server = app.listen(port, () => {
-  console.log(`App server now listening to port ${port}`);
-});
 
-const io = socket(server, { cors: { origin: ['http://localhost:3000', 'https://algo-trader.jake-t.codes'], } });
 
 app.use(bodyParser.urlencoded({ extended: false }))
 app.use(bodyParser.json())
 app.use(express.static('public'));
 app.use(function(req, res, next) {
-  const allowedOrigins = ['http://localhost:3000', 'https://algo-trader.jake-t.codes'];
+  const allowedOrigins = ['http://localhost:3000', 'http://localhost:5000', 'https://algo-trader.jake-t.codes'];
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
        res.setHeader('Access-Control-Allow-Origin', origin);
@@ -34,6 +32,10 @@ const pool = mysql.createPool({
   user: process.env.MYSQL_USER,
   password: process.env.MYSQL_PWD,
   database: process.env.MYSQL_DB,
+});
+
+const server = http.listen(port, () => {
+  console.log(`App server now listening to port ${port}`);
 });
 
 // Listen for GET requests to '/' and return welcome message with API version number.
@@ -92,26 +94,26 @@ app.patch('/backtest_properties/date', (req, res) => {
   // Extract data from request body.
   const { backtest_date: backtestDate } = req.body;
 
-	// Query constructor to update the backtest date.
-	pool.query(`
-		UPDATE backtest_properties
-		  SET
-		    backtest_date = ?`, 
-		[backtestDate], (err, row) => {
-			if(err) {
-				// If the MySQL query returned an error, pass the error message onto the client.
-				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-				delete err.stack;
-				console.warn(new Date(), err);
-			} else {
-				// Valid and successful request.
+  // Query constructor to update the backtest date.
+  pool.query(`
+    UPDATE backtest_properties
+      SET
+        backtest_date = ?`,
+    [backtestDate], (err, row) => {
+      if(err) {
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+        delete err.stack;
+        console.warn(new Date(), err);
+      } else {
+        // Valid and successful request.
         res.send(row);
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         payload = { backtestDate: formattedDate }
-        io.sockets.emit("dateUpdated", payload);
-			}
-	});
+        io.emit("dateUpdated", payload);
+      }
+  });
 })
 
 // Listen for GET requests to /backtest_properties/date to get the current date in the backtest.
