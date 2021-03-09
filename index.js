@@ -32,6 +32,7 @@ const pool = mysql.createPool({
   user: process.env.MYSQL_USER,
   password: process.env.MYSQL_PWD,
   database: process.env.MYSQL_DB,
+  multipleStatements: true
 });
 
 const server = http.listen(port, () => {
@@ -133,4 +134,33 @@ app.get('/backtest_properties/date', (req, res) => {
 				res.send(data);
 			}
 	});
+})
+
+// Listen for POST requests to /trades to add a new trade to the open_trades table.
+app.post('/trades', (req, res) => {
+
+  const { ticker, buy_date: buyDate, share_qty: shareQty, investment_total: investmentTotal, buy_price: buyPrice, 
+    current_price: currentPrice, take_profit: takeProfit, stop_loss: stopLoss, figure_pct: figurePct } = req.body;
+  
+  const figure = JSON.stringify(req.body.figure);
+
+
+  // Query constructor to update the backtest properties.
+	pool.query(`
+    INSERT INTO open_trades
+      (ticker, buy_date, share_qty, investment_total, buy_price, current_price, take_profit, stop_loss, figure, figure_pct)
+    VALUES
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    SELECT LAST_INSERT_ID() AS trade_id;`, 
+  [ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, figurePct], (err, row) => {
+    if(err) {
+      // If the MySQL query returned an error, pass the error message onto the client.
+      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+      delete err.stack;
+      console.warn(new Date(), err);
+    } else {
+      // Valid and successful request.
+      res.send(row[1][0]);
+    }
+  });
 })
