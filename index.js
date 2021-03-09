@@ -165,6 +165,8 @@ app.post('/trades', (req, res) => {
     } else {
       // Valid and successful request, return the trade_id in the response body.
       res.send(row[1][0]);
+      // Send an event to the UI to tell it to make a GET request to update the list of trades.
+      io.emit("tradesUpdated");
     }
   });
 })
