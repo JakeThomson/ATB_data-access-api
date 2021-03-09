@@ -209,6 +209,10 @@ app.get('/trades', (req, res) => {
 			} else {
 				// Valid and successful request, return the formatted date within an object.
         data = row
+        // JSON object must be parsed twice for some reason in order for it to be recognised as a JSON object.
+        for(i=0; i<data.length; i++) {
+          data[i].figure = JSON.parse(JSON.parse(data[i].figure))
+        }
 				res.send(data);
 			}
 	});
