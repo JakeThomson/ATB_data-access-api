@@ -76,7 +76,8 @@ app.put('/backtest_properties/initialise', (req, res) => {
         totalProfitLossPercentage = ?,
         isPaused = ?,
         totalProfitLossGraph = ?;
-        truncate openTrades;`, 
+        truncate openTrades;
+        truncate closedTrades;`, 
 		[backtestDate, startBalance, totalBalance, availableBalance, totalProfitLossValue, 
 			totalProfitLossPercentage, isPaused, totalProfitLossGraph], (err, row) => {
 			if(err) {
@@ -225,7 +226,8 @@ app.put('/trades', (req, res) => {
         closedTrades = req.body.closed_trades;
   var openTradeValues = [],
       closedTradeValues = [],
-      openTradeMySQLString = "";
+      openTradeMySQLString = "",
+      closedTradeMySQLString = "";
 
   openTrades.forEach(trade => {
     const {trade_id: tradeId, current_price: currentPrice, figure_pct: figurePct} = trade;
@@ -236,35 +238,52 @@ app.put('/trades', (req, res) => {
   });
 
   closedTrades.forEach(trade => {
-    const {trade_id: tradeId, current_price: currentPrice, figure_pct: figurePct} = trade;
+    const {trade_id: tradeId, ticker, buy_date: buyDate, sell_date: sellDate, share_qty: shareQty, investment_total: investmentTotal, profit_loss: profitLoss,
+      buy_price: buyPrice, sell_price: sellPrice, take_profit: takeProfit, stop_loss: stopLoss, figure_pct: figurePct} = trade;
     const figure = JSON.stringify(trade.figure);
-    values = [currentPrice, figure, figurePct, tradeId];
-    closedTradeValues.push(values);
-    console.log(tradeId, currentPrice, figurePct);
+    values = [tradeId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, sellPrice, takeProfit, stopLoss, figure, figurePct, tradeId];
+    closedTradeValues.push(...values);
+    closedTradeMySQLString += "INSERT INTO closedTrades (tradeId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, \
+      sellPrice, takeProfit, stopLoss, figure, figurePct)\ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);\
+      DELETE FROM openTrades WHERE tradeId = ?;"
   });
   
+  result = []
+
   if(openTradeValues.length > 0) {
     // Query constructor to update the backtest properties.
     pool.query(openTradeMySQLString,
       openTradeValues, (err, row) => {
         if(err) {
+          console.warn(new Date(), err);
           // If the MySQL query returned an error, pass the error message onto the client.
           res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-          delete err.stack;
-          console.warn(new Date(), err);
         } else {
           // Valid and successful request.
-          res.send(row);
-          io.emit("tradesUpdated");
+          result.push(row);
         }
     });
   }
+  if(closedTradeValues.length > 0) {
+    // Query constructor to update the backtest properties.
+    pool.query(closedTradeMySQLString,
+      closedTradeValues, (err, row) => {
+        if(err) {
+          console.warn(new Date(), err);
+          // If the MySQL query returned an error, pass the error message onto the client.
+          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+        } else {
+          // Valid and successful request.
+          result.push(row);
+        }
+    });
+  }
+  res.send(result);
+  io.emit("tradesUpdated");
 })
 
 // Listen for PATCH requests to /trades to update a certain trade.
 app.patch('/trades/:tradeId', (req, res) => {
-
-
 
   const { current_price: currentPrice, figure_pct: figurePct } = req.body;
   const tradeId  = req.params.tradeId;
