@@ -32,6 +32,7 @@ const pool = mysql.createPool({
   user: process.env.MYSQL_USER,
   password: process.env.MYSQL_PWD,
   database: process.env.MYSQL_DB,
+  multipleStatements: true
 });
 
 const server = http.listen(port, () => {
@@ -65,16 +66,17 @@ app.put('/backtest_properties/initialise', (req, res) => {
 
 	// Query constructor to update the backtest properties.
 	pool.query(`
-		UPDATE backtest_properties
+		UPDATE backtestProperties
 		  SET
-        backtest_date = ?,
-        start_balance = ?,
-        total_balance = ?,
-        available_balance = ?,
-        total_profit_loss_value = ?,
-        total_profit_loss_percentage = ?,
-        is_paused = ?,
-        total_profit_loss_graph = ?`, 
+        backtestDate = ?,
+        startBalance = ?,
+        totalBalance = ?,
+        availableBalance = ?,
+        totalProfitLossValue = ?,
+        totalProfitLossPercentage = ?,
+        isPaused = ?,
+        totalProfitLossGraph = ?;
+        truncate openTrades;`, 
 		[backtestDate, startBalance, totalBalance, availableBalance, totalProfitLossValue, 
 			totalProfitLossPercentage, isPaused, totalProfitLossGraph], (err, row) => {
 			if(err) {
@@ -85,6 +87,10 @@ app.put('/backtest_properties/initialise', (req, res) => {
 			} else {
 				// Valid and successful request.
 				res.send(row);
+        // Send the new date as an event to the socket connection.
+        formattedDate = moment(backtestDate).format('DD/MM/YYYY')
+        payload = { backtestDate: formattedDate, availableBalance }
+        io.emit("backtestPropertiesUpdated", payload);
 			}
 	});
 })
@@ -96,9 +102,9 @@ app.patch('/backtest_properties/date', (req, res) => {
 
   // Query constructor to update the backtest date.
   pool.query(`
-    UPDATE backtest_properties
+    UPDATE backtestProperties
       SET
-        backtest_date = ?`,
+        backtestDate = ?`,
     [backtestDate], (err, row) => {
       if(err) {
         // If the MySQL query returned an error, pass the error message onto the client.
@@ -111,16 +117,15 @@ app.patch('/backtest_properties/date', (req, res) => {
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         payload = { backtestDate: formattedDate }
-        io.emit("dateUpdated", payload);
+        io.emit("backtestPropertiesUpdated", payload);
       }
   });
 })
 
 // Listen for GET requests to /backtest_properties/date to get the current date in the backtest.
-app.get('/backtest_properties/date', (req, res) => {
-
+app.get('/backtest_properties', (req, res) => {
 	// Query constructor to get the current the backtest date.
-	pool.query(`SELECT backtest_date FROM backtest_properties;`, (err, row) => {
+	pool.query(`SELECT * FROM backtestProperties;`, (err, row) => {
 			if(err) {
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
@@ -129,7 +134,85 @@ app.get('/backtest_properties/date', (req, res) => {
 			} else {
 				// Valid and successful request, return the formatted date within an object.
         data = row[0]
-        data.backtest_date = moment(data.backtest_date).format('DD/MM/YYYY')
+        data.backtestDate = moment(data.backtestDate).format('DD/MM/YYYY')
+				res.send(data);
+			}
+	});
+})
+
+// Listen for POST requests to /trades to add a new trade to the open_trades table.
+app.post('/trades', (req, res) => {
+
+  const { ticker, buy_date: buyDate, share_qty: shareQty, investment_total: investmentTotal, buy_price: buyPrice, 
+    current_price: currentPrice, take_profit: takeProfit, stop_loss: stopLoss, figure_pct: figurePct } = req.body;
+  
+  const figure = JSON.stringify(req.body.figure);
+
+
+  // Query constructor to update the backtest properties, it returns the trade_id in the response object.
+	pool.query(`
+    INSERT INTO openTrades
+      (ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, figurePct)
+    VALUES
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    SELECT LAST_INSERT_ID() AS trade_id;`, 
+  [ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, figurePct], (err, row) => {
+    if(err) {
+      // If the MySQL query returned an error, pass the error message onto the client.
+      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+      delete err.stack;
+      console.warn(new Date(), err);
+    } else {
+      // Valid and successful request, return the trade_id in the response body.
+      res.send(row[1][0]);
+      // Send an event to the UI to tell it to make a GET request to update the list of trades.
+      io.emit("tradesUpdated");
+    }
+  });
+})
+
+// Listen for PATCH requests to /backtest_properties/date to set a new date value in the backtest.
+app.patch('/backtest_properties/available_balance', (req, res) => {
+  // Extract data from request body.
+  const { available_balance: availableBalance } = req.body;
+
+  // Query constructor to update the backtest date.
+  pool.query(`
+    UPDATE backtestProperties
+      SET
+        availableBalance = ?`,
+    [availableBalance], (err, row) => {
+      if(err) {
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+        delete err.stack;
+        console.warn(new Date(), err);
+      } else {
+        // Valid and successful request.
+        res.send(row);
+        // Send the new date as an event to the socket connection.
+        payload = { availableBalance: availableBalance }
+        io.emit("backtestPropertiesUpdated", payload);
+      }
+  });
+})
+
+// Listen for GET requests to /trades to get the current trades in the backtest.
+app.get('/trades', (req, res) => {
+	// Query constructor to get the current the backtest date.
+	pool.query(`SELECT * FROM openTrades;`, (err, row) => {
+			if(err) {
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+				delete err.stack;
+				console.warn(new Date(), err);
+			} else {
+				// Valid and successful request, return the formatted date within an object.
+        data = row
+        // JSON object must be parsed twice for some reason in order for it to be recognised as a JSON object.
+        for(i=0; i<data.length; i++) {
+          data[i].figure = JSON.parse(JSON.parse(data[i].figure))
+        }
 				res.send(data);
 			}
 	});
