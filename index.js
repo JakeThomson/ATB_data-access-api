@@ -13,7 +13,7 @@ const port = 8080;
 
 
 app.use(bodyParser.urlencoded({ extended: false }))
-app.use(bodyParser.json())
+app.use(bodyParser.json({limit: "50mb"}))
 app.use(express.static('public'));
 app.use(function(req, res, next) {
   const allowedOrigins = ['http://localhost:3000', 'http://localhost:5000', 'https://algo-trader.jake-t.codes'];
@@ -59,8 +59,8 @@ app.put('/backtest_properties/initialise', (req, res) => {
 	
 	const totalBalance = startBalance,
 				availableBalance = startBalance,
-				totalProfitLossValue = "£0.00",
-				totalProfitLossPercentage = "0.0%",
+				totalProfitLossValue = 0,
+				totalProfitLossPercentage = 0,
 				isPaused = false,
 				totalProfitLossGraph = JSON.stringify({"graph":"placeholder"})
 
@@ -214,6 +214,82 @@ app.get('/trades', (req, res) => {
           data[i].figure = JSON.parse(JSON.parse(data[i].figure))
         }
 				res.send(data);
+			}
+	});
+})
+
+// Listen for PUT requests to /trades to update all open trades and send the closed ones to the closed trades table.
+app.put('/trades', (req, res) => {
+
+  const openTrades = req.body.open_trades,
+        closedTrades = req.body.closed_trades;
+  var openTradeValues = [],
+      closedTradeValues = [],
+      openTradeMySQLString = "";
+
+  openTrades.forEach(trade => {
+    const {trade_id: tradeId, current_price: currentPrice, figure_pct: figurePct} = trade;
+    const figure = JSON.stringify(trade.figure);
+    values = [currentPrice, figure, figurePct, tradeId];
+    openTradeValues.push(...values);
+    openTradeMySQLString += "UPDATE openTrades SET currentPrice = ?, figure = ?, figurePct= ? WHERE tradeId = ?;"
+  });
+
+  closedTrades.forEach(trade => {
+    const {trade_id: tradeId, current_price: currentPrice, figure_pct: figurePct} = trade;
+    const figure = JSON.stringify(trade.figure);
+    values = [currentPrice, figure, figurePct, tradeId];
+    closedTradeValues.push(values);
+    console.log(tradeId, currentPrice, figurePct);
+  });
+  
+  if(openTradeValues.length > 0) {
+    // Query constructor to update the backtest properties.
+    pool.query(openTradeMySQLString,
+      openTradeValues, (err, row) => {
+        if(err) {
+          // If the MySQL query returned an error, pass the error message onto the client.
+          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+          delete err.stack;
+          console.warn(new Date(), err);
+        } else {
+          // Valid and successful request.
+          res.send(row);
+          io.emit("tradesUpdated");
+        }
+    });
+  }
+})
+
+// Listen for PATCH requests to /trades to update a certain trade.
+app.patch('/trades/:tradeId', (req, res) => {
+
+
+
+  const { current_price: currentPrice, figure_pct: figurePct } = req.body;
+  const tradeId  = req.params.tradeId;
+
+  const figure = JSON.stringify(req.body.figure);
+
+  // Query constructor to update data from form into database at the correct row.
+  pool.query(`
+    UPDATE openTrades
+      SET
+        currentPrice = ?,
+        figure = ?,
+        figurePct= ?
+      WHERE
+        tradeId = ?;`, 
+    [currentPrice, figure, figurePct, tradeId], (err, row) => {
+      if(err) {
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+				delete err.stack;
+				console.warn(new Date(), err);
+			} else {
+				// Valid and successful request, return the formatted date within an object.
+				res.send(row);
+        io.emit("tradesUpdated");
 			}
 	});
 })
