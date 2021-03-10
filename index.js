@@ -59,8 +59,8 @@ app.put('/backtest_properties/initialise', (req, res) => {
 	
 	const totalBalance = startBalance,
 				availableBalance = startBalance,
-				totalProfitLossValue = 0,
-				totalProfitLossPercentage = 0,
+				totalProfitLoss = 0,
+				totalProfitLossPct = 0,
 				isPaused = false,
 				totalProfitLossGraph = JSON.stringify({"graph":"placeholder"})
 
@@ -72,14 +72,14 @@ app.put('/backtest_properties/initialise', (req, res) => {
         startBalance = ?,
         totalBalance = ?,
         availableBalance = ?,
-        totalProfitLossValue = ?,
-        totalProfitLossPercentage = ?,
+        totalProfitLoss = ?,
+        totalProfitLossPct = ?,
         isPaused = ?,
         totalProfitLossGraph = ?;
         truncate openTrades;
         truncate closedTrades;`, 
-		[backtestDate, startBalance, totalBalance, availableBalance, totalProfitLossValue, 
-			totalProfitLossPercentage, isPaused, totalProfitLossGraph], (err, row) => {
+		[backtestDate, startBalance, totalBalance, availableBalance, totalProfitLoss, 
+			totalProfitLossPct, isPaused, totalProfitLossGraph], (err, row) => {
 			if(err) {
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
@@ -173,16 +173,20 @@ app.post('/trades', (req, res) => {
 })
 
 // Listen for PATCH requests to /backtest_properties/date to set a new date value in the backtest.
-app.patch('/backtest_properties/available_balance', (req, res) => {
+app.put('/backtest_properties', (req, res) => {
   // Extract data from request body.
-  const { available_balance: availableBalance } = req.body;
-
+  const { total_balance: totalBalance, available_balance: availableBalance, total_profit_loss: totalProfitLoss, total_profit_loss_pct: totalProfitLossPct } = req.body;
+  const  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
   // Query constructor to update the backtest date.
   pool.query(`
     UPDATE backtestProperties
       SET
-        availableBalance = ?`,
-    [availableBalance], (err, row) => {
+        totalBalance = ?,
+        availableBalance = ?,
+        totalProfitLoss = ?,
+        totalProfitLossPct = ?,
+        totalProfitLossGraph = ?;`,
+    [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph], (err, row) => {
       if(err) {
         // If the MySQL query returned an error, pass the error message onto the client.
         res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
@@ -192,7 +196,7 @@ app.patch('/backtest_properties/available_balance', (req, res) => {
         // Valid and successful request.
         res.send(row);
         // Send the new date as an event to the socket connection.
-        payload = { availableBalance: availableBalance }
+        payload = { totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph }
         io.emit("backtestPropertiesUpdated", payload);
       }
   });
