@@ -61,8 +61,8 @@ app.put('/backtest_properties/initialise', (req, res) => {
 				availableBalance = startBalance,
 				totalProfitLoss = 0,
 				totalProfitLossPct = 0,
-				isPaused = false,
-				totalProfitLossGraph = JSON.stringify({"graph":"placeholder"})
+				isPaused = false;
+	var totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph)
 
 	// Query constructor to update the backtest properties.
 	pool.query(`
@@ -81,16 +81,16 @@ app.put('/backtest_properties/initialise', (req, res) => {
 		[backtestDate, startBalance, totalBalance, availableBalance, totalProfitLoss, 
 			totalProfitLossPct, isPaused, totalProfitLossGraph], (err, row) => {
 			if(err) {
+				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-				delete err.stack;
-				console.warn(new Date(), err);
 			} else {
 				// Valid and successful request.
 				res.send(row);
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
-        payload = { backtestDate: formattedDate, availableBalance }
+        totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
+        payload = { backtestDate: formattedDate, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph }
         io.emit("backtestPropertiesUpdated", payload);
         io.emit("tradesUpdated");
 			}
@@ -109,10 +109,9 @@ app.patch('/backtest_properties/date', (req, res) => {
         backtestDate = ?`,
     [backtestDate], (err, row) => {
       if(err) {
+        console.warn(new Date(), err);
         // If the MySQL query returned an error, pass the error message onto the client.
         res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-        delete err.stack;
-        console.warn(new Date(), err);
       } else {
         // Valid and successful request.
         res.send(row);
@@ -129,10 +128,9 @@ app.get('/backtest_properties', (req, res) => {
 	// Query constructor to get the current the backtest date.
 	pool.query(`SELECT * FROM backtestProperties;`, (err, row) => {
 			if(err) {
+				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-				delete err.stack;
-				console.warn(new Date(), err);
 			} else {
 				// Valid and successful request, return the formatted date within an object.
         data = row[0]
@@ -160,10 +158,9 @@ app.post('/trades', (req, res) => {
     SELECT LAST_INSERT_ID() AS trade_id;`, 
   [ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct], (err, row) => {
     if(err) {
+      console.warn(new Date(), err);
       // If the MySQL query returned an error, pass the error message onto the client.
       res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-      delete err.stack;
-      console.warn(new Date(), err);
     } else {
       // Valid and successful request, return the trade_id in the response body.
       res.send(row[1][0]);
@@ -177,7 +174,9 @@ app.post('/trades', (req, res) => {
 app.put('/backtest_properties', (req, res) => {
   // Extract data from request body.
   const { total_balance: totalBalance, available_balance: availableBalance, total_profit_loss: totalProfitLoss, total_profit_loss_pct: totalProfitLossPct } = req.body;
-  const  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
+  
+  var  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
+  
   // Query constructor to update the backtest date.
   pool.query(`
     UPDATE backtestProperties
@@ -189,14 +188,14 @@ app.put('/backtest_properties', (req, res) => {
         totalProfitLossGraph = ?;`,
     [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph], (err, row) => {
       if(err) {
+        console.warn(new Date(), err);
         // If the MySQL query returned an error, pass the error message onto the client.
         res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-        delete err.stack;
-        console.warn(new Date(), err);
       } else {
         // Valid and successful request.
         res.send(row);
         // Send the new date as an event to the socket connection.
+        totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
         payload = { totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph }
         io.emit("backtestPropertiesUpdated", payload);
       }
@@ -212,10 +211,9 @@ app.get('/trades', (req, res) => {
       SELECT * FROM closedTrades ORDER BY \`index\` DESC LIMIT 10
     ) sub;`, (err, row) => {
 			if(err) {
+				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-				delete err.stack;
-				console.warn(new Date(), err);
 			} else {
 				// Valid and successful request, return the formatted date within an object.
         data = [row[0], row[2]]
@@ -313,10 +311,9 @@ app.patch('/trades/:tradeId', (req, res) => {
         tradeId = ?;`, 
     [currentPrice, figure, figurePct, tradeId], (err, row) => {
       if(err) {
+				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-				delete err.stack;
-				console.warn(new Date(), err);
 			} else {
 				// Valid and successful request, return the formatted date within an object.
 				res.send(row);
