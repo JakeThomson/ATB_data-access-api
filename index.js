@@ -61,9 +61,9 @@ app.put('/backtest_properties/initialise', (req, res) => {
 				availableBalance = startBalance,
 				totalProfitLoss = 0,
 				totalProfitLossPct = 0,
-				isPaused = false;
+				isPaused = false,
+        successRate = 0;
 	var totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph)
-
 	// Query constructor to update the backtest properties.
 	pool.query(`
 		UPDATE backtestProperties
@@ -75,11 +75,12 @@ app.put('/backtest_properties/initialise', (req, res) => {
         totalProfitLoss = ?,
         totalProfitLossPct = ?,
         isPaused = ?,
-        totalProfitLossGraph = ?;
+        totalProfitLossGraph = ?,
+        successRate = ?;
         truncate openTrades;
         truncate closedTrades;`, 
 		[backtestDate, startBalance, totalBalance, availableBalance, totalProfitLoss, 
-			totalProfitLossPct, isPaused, totalProfitLossGraph], (err, row) => {
+			totalProfitLossPct, isPaused, totalProfitLossGraph, successRate], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
@@ -90,7 +91,7 @@ app.put('/backtest_properties/initialise', (req, res) => {
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { backtestDate: formattedDate, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph }
+        payload = { backtestDate: formattedDate, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
         io.emit("backtestPropertiesUpdated", payload);
         io.emit("tradesUpdated");
 			}
@@ -133,7 +134,7 @@ app.get('/backtest_properties', (req, res) => {
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
 				// Valid and successful request, return the formatted date within an object.
-        data = row[0]
+        data = row[0];
         data.backtestDate = moment(data.backtestDate).format('DD/MM/YYYY')
 				res.send(data);
 			}
@@ -185,7 +186,9 @@ app.put('/backtest_properties', (req, res) => {
         availableBalance = ?,
         totalProfitLoss = ?,
         totalProfitLossPct = ?,
-        totalProfitLossGraph = ?;`,
+        totalProfitLossGraph = ?,
+        successRate = IFNULL((SELECT (SUM(profitLoss >= 0)/count(*))*100 FROM closedTrades), 0);
+        SELECT (SUM(profitLoss >= 0)/count(*))*100 AS 'successRate' FROM closedTrades;`,
     [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph], (err, row) => {
       if(err) {
         console.warn(new Date(), err);
@@ -194,9 +197,10 @@ app.put('/backtest_properties', (req, res) => {
       } else {
         // Valid and successful request.
         res.send(row);
+        const successRate = row[1][0].successRate;
         // Send the new date as an event to the socket connection.
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph }
+        payload = { totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
         io.emit("backtestPropertiesUpdated", payload);
       }
   });

@@ -1,6 +1,6 @@
 {
   "name": "atb_data-access-api",
-  "version": "0.3.0",
+  "version": "1.3.3",
   "description": "The data access layer for the algorithmic trading bot project.",
   "main": "index.js",
   "scripts": {
