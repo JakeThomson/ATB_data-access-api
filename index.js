@@ -1,7 +1,8 @@
 const express = require('express');
+var cors = require('cors');
 const app = express();
 const http = require('http').createServer(app);
-const io = require('socket.io')(http, { cors: { origin: ['http://localhost:3000', 'http://localhost:5000', 'https://algo-trader.jake-t.codes'], } });
+const io = require('socket.io')(http, { cors: { origin: ['http://localhost:3000', 'http://localhost:5000', 'https://algo-trader.jake-t.codes'] } });
 const mysql = require('mysql');
 const bodyParser = require('body-parser');
 const socket = require('socket.io');
@@ -10,20 +11,33 @@ const packageJson = require('./package.json');
 
 const port = 8080;
 
-
-
 app.use(bodyParser.urlencoded({ extended: false }))
 app.use(bodyParser.json({limit: "50mb"}))
 app.use(express.static('public'));
 app.use(function(req, res, next) {
   const allowedOrigins = ['http://localhost:3000', 'http://localhost:5000', 'https://algo-trader.jake-t.codes'];
   const origin = req.headers.origin;
+  res.setHeader('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS');
   if (allowedOrigins.includes(origin)) {
-       res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Origin', origin);
   };
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
   next();
 });
+// app.use(cors({
+//   origin: function(origin, callback){
+//     const allowedOrigins = ['http://localhost:3000', 'http://localhost:5000', 'https://algo-trader.jake-t.codes'];
+//     // allow requests with no origin 
+//     if(!origin) return callback(null, true);
+//     if(allowedOrigins.indexOf(origin) === -1){
+//       var message = "The CORS policy for this origin doesn't " +
+//                 "allow access from the particular origin.";
+//       return callback(new Error(message), false);
+//     }
+//     return callback(null, true);
+//   },
+//   credentials: true,
+// }));
 
 // Connect to database using env variables.
 const pool = mysql.createPool({
@@ -124,7 +138,7 @@ app.patch('/backtest_properties/date', (req, res) => {
   });
 })
 
-// Listen for GET requests to /backtest_properties/date to get the current date in the backtest.
+// Listen for GET requests to /backtest_properties to get the current backtest properties.
 app.get('/backtest_properties', (req, res) => {
 	// Query constructor to get the current the backtest date.
 	pool.query(`SELECT * FROM backtestProperties;`, (err, row) => {
@@ -139,6 +153,47 @@ app.get('/backtest_properties', (req, res) => {
 				res.send(data);
 			}
 	});
+})
+
+// Listen for GET requests to /backtest_properties/is_paused to get the current pause state of the backtest.
+app.get('/backtest_properties/is_paused', (req, res) => {
+	// Query constructor to get the current the backtest date.
+	pool.query(`SELECT isPaused FROM backtestProperties;`, (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request, return the formatted date within an object.
+        data = row[0];
+				res.send(data);
+			}
+	});
+})
+
+// Listen for PATCH requests to /backtest_properties/is_paused to set the current pause state of the backtest.
+app.patch('/backtest_properties/is_paused', (req, res) => {
+	// Query constructor to get the current the backtest date.
+  const { isPaused } = req.body;
+
+	 // Query constructor to update the backtest date.
+   pool.query(`
+   UPDATE backtestProperties
+     SET
+       isPaused = ?`,
+   [isPaused], (err, row) => {
+     if(err) {
+       console.warn(new Date(), err);
+       // If the MySQL query returned an error, pass the error message onto the client.
+       res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+     } else {
+       // Valid and successful request.
+       res.send(row);
+       // Send the new date as an event to the socket connection.
+       payload = { isPaused: isPaused }
+       io.emit("backtestPropertiesUpdated", payload);
+     }
+ });
 })
 
 // Listen for POST requests to /trades to add a new trade to the open_trades table.
