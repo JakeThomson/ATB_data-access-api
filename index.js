@@ -5,7 +5,6 @@ const http = require('http').createServer(app);
 const io = require('socket.io')(http, { cors: { origin: ['http://localhost:3000', 'http://localhost:5000', 'https://algo-trader.jake-t.codes'] } });
 const mysql = require('mysql');
 const bodyParser = require('body-parser');
-const socket = require('socket.io');
 const moment = require('moment');
 const packageJson = require('./package.json');
 
@@ -61,6 +60,10 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
   console.log('a user connected');
 
+  socket.on('restart', () => {
+    io.emit('restartBacktest');
+  })
+
   socket.on('disconnect', () => {
     console.log('user disconnected');
   });
@@ -75,7 +78,6 @@ app.put('/backtest_properties/initialise', (req, res) => {
 				availableBalance = startBalance,
 				totalProfitLoss = 0,
 				totalProfitLossPct = 0,
-				isPaused = false,
         successRate = 0;
 	var totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph)
 	// Query constructor to update the backtest properties.
@@ -88,13 +90,12 @@ app.put('/backtest_properties/initialise', (req, res) => {
         availableBalance = ?,
         totalProfitLoss = ?,
         totalProfitLossPct = ?,
-        isPaused = ?,
         totalProfitLossGraph = ?,
         successRate = ?;
         truncate openTrades;
         truncate closedTrades;`, 
 		[backtestDate, startBalance, totalBalance, availableBalance, totalProfitLoss, 
-			totalProfitLossPct, isPaused, totalProfitLossGraph, successRate], (err, row) => {
+			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
@@ -105,7 +106,7 @@ app.put('/backtest_properties/initialise', (req, res) => {
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { backtestDate: formattedDate, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
+        payload = { backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
         io.emit("backtestPropertiesUpdated", payload);
         io.emit("tradesUpdated");
 			}
@@ -192,6 +193,7 @@ app.patch('/backtest_properties/is_paused', (req, res) => {
        // Send the new date as an event to the socket connection.
        payload = { isPaused: isPaused }
        io.emit("backtestPropertiesUpdated", payload);
+       io.emit("playpause", payload);
      }
  });
 })
