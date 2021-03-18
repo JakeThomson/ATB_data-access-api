@@ -10,6 +10,7 @@ const packageJson = require('./package.json');
 
 const port = 8080;
 
+// Set up express settings to work as intended with JSON size limits and CORS policies.
 app.use(bodyParser.urlencoded({ extended: false }))
 app.use(bodyParser.json({limit: "50mb"}))
 app.use(express.static('public'));
@@ -23,20 +24,6 @@ app.use(function(req, res, next) {
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
   next();
 });
-// app.use(cors({
-//   origin: function(origin, callback){
-//     const allowedOrigins = ['http://localhost:3000', 'http://localhost:5000', 'https://algo-trader.jake-t.codes'];
-//     // allow requests with no origin 
-//     if(!origin) return callback(null, true);
-//     if(allowedOrigins.indexOf(origin) === -1){
-//       var message = "The CORS policy for this origin doesn't " +
-//                 "allow access from the particular origin.";
-//       return callback(new Error(message), false);
-//     }
-//     return callback(null, true);
-//   },
-//   credentials: true,
-// }));
 
 // Connect to database using env variables.
 const pool = mysql.createPool({
@@ -57,14 +44,18 @@ app.get('/', (req, res) => {
   res.send(`Jake's trading api (version: ${packageJson.version})`);
 });
 
+// Socket event listeners.
 io.on('connection', (socket) => {
+  // Send by clients when a connection has been made.
   console.log('a user connected');
 
   socket.on('restart', () => {
+    // Called by the UI to initiate a restart in the backend.
     io.emit('restartBacktest');
   })
 
   socket.on('disconnect', () => {
+    // Sent by clients on disconnect.
     console.log('user disconnected');
   });
 });
@@ -148,7 +139,7 @@ app.get('/backtest_properties', (req, res) => {
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return the formatted date within an object.
+				// Valid and successful request, return the properties within an object wit the date formatted.
         data = row[0];
         data.backtestDate = moment(data.backtestDate).format('DD/MM/YYYY')
 				res.send(data);
@@ -158,14 +149,14 @@ app.get('/backtest_properties', (req, res) => {
 
 // Listen for GET requests to /backtest_properties/is_paused to get the current pause state of the backtest.
 app.get('/backtest_properties/is_paused', (req, res) => {
-	// Query constructor to get the current the backtest date.
+	// Query constructor to get the current pause state of the backtest.
 	pool.query(`SELECT isPaused FROM backtestProperties;`, (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return the formatted date within an object.
+				// Valid and successful request, return thepaused state within an object.
         data = row[0];
 				res.send(data);
 			}
@@ -177,7 +168,7 @@ app.patch('/backtest_properties/is_paused', (req, res) => {
 	// Query constructor to get the current the backtest date.
   const { isPaused } = req.body;
 
-	 // Query constructor to update the backtest date.
+	 // Query constructor to update the backtest paused state.
    pool.query(`
    UPDATE backtestProperties
      SET
@@ -190,7 +181,7 @@ app.patch('/backtest_properties/is_paused', (req, res) => {
      } else {
        // Valid and successful request.
        res.send(row);
-       // Send the new date as an event to the socket connection.
+       // Send the new paused state as an event to the socket connection.
        payload = { isPaused: isPaused }
        io.emit("backtestPropertiesUpdated", payload);
        io.emit("playpause", payload);
@@ -207,7 +198,7 @@ app.post('/trades', (req, res) => {
   const figure = JSON.stringify(req.body.figure);
 
 
-  // Query constructor to update the backtest properties, it returns the trade_id in the response object.
+  // Query constructor to send a new trade to openTrades.
 	pool.query(`
     INSERT INTO openTrades
       (ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct)
@@ -235,7 +226,7 @@ app.put('/backtest_properties', (req, res) => {
   
   var  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
   
-  // Query constructor to update the backtest date.
+  // Query constructor to update the backtest properties.
   pool.query(`
     UPDATE backtestProperties
       SET
@@ -265,7 +256,7 @@ app.put('/backtest_properties', (req, res) => {
 
 // Listen for GET requests to /trades to get the current trades in the backtest.
 app.get('/trades', (req, res) => {
-	// Query constructor to get the current the backtest date.
+	// Query constructor to get all current open and closed trades..
 	pool.query(`
     SELECT * FROM openTrades; SELECT * FROM closedTrades;
     SELECT * FROM (
@@ -278,7 +269,7 @@ app.get('/trades', (req, res) => {
 			} else {
 				// Valid and successful request, return the formatted date within an object.
         data = [row[0], row[2]]
-        // JSON object must be parsed twice for some reason in order for it to be recognised as a JSON object.
+        // Separate and parse the two results for the UI to easily use.
         for(i=0; i<data[0].length; i++) {
           data[0][i].figure = JSON.parse(JSON.parse(data[0][i].figure))
         }
@@ -300,6 +291,7 @@ app.put('/trades', (req, res) => {
       openTradeMySQLString = "",
       closedTradeMySQLString = "";
 
+  // Generate MySQL query string and inputs, to allow the backtest to update all required trades in the openTrades table.
   openTrades.forEach(trade => {
     const {trade_id: tradeId, current_price: currentPrice, profit_loss_pct: profitLossPct} = trade;
     const figure = JSON.stringify(trade.figure);
@@ -308,6 +300,7 @@ app.put('/trades', (req, res) => {
     openTradeMySQLString += "UPDATE openTrades SET currentPrice = ?, figure = ?, profitLossPct= ? WHERE tradeId = ?;"
   });
 
+  // Generate MySQL query string and inputs, to allow the backtest to add all required trades in the closedTrades table.
   closedTrades.forEach(trade => {
     const {trade_id: tradeId, ticker, buy_date: buyDate, sell_date: sellDate, share_qty: shareQty, investment_total: investmentTotal, profit_loss: profitLoss,
       buy_price: buyPrice, sell_price: sellPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct} = trade;
@@ -322,7 +315,7 @@ app.put('/trades', (req, res) => {
   result = []
 
   if(openTradeValues.length > 0) {
-    // Query constructor to update the backtest properties.
+    // Query constructor to update the open trades.
     pool.query(openTradeMySQLString,
       openTradeValues, (err, row) => {
         if(err) {
@@ -336,7 +329,7 @@ app.put('/trades', (req, res) => {
     });
   }
   if(closedTradeValues.length > 0) {
-    // Query constructor to update the backtest properties.
+    // Query constructor to move trades from the openTrades table to closedTrades.
     pool.query(closedTradeMySQLString,
       closedTradeValues, (err, row) => {
         if(err) {
