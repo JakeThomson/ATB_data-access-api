@@ -49,6 +49,26 @@ io.on('connection', (socket) => {
   // Send by clients when a connection has been made.
   console.log('a user connected');
 
+  socket.on('backtestAvailability', data => {
+    const { backtestOnline } = data
+    // Query constructor to update the backtest date.
+    pool.query(`
+    UPDATE backtestProperties
+      SET
+        backtestOnline = ?`,
+    [backtestOnline], (err, row) => {
+      if(err) {
+        // If the MySQL query returned an error, log it.
+        console.warn(new Date(), err);
+      } else {
+        // Valid and successful request.
+        // Send the new date as an event to the socket connection.
+        payload = { backtestOnline: backtestOnline }
+        io.emit("backtestPropertiesUpdated", payload);
+      }
+    });
+  })
+
   socket.on('restart', () => {
     // Called by the UI to initiate a restart in the backend.
     io.emit('restartBacktest');
@@ -139,7 +159,7 @@ app.get('/backtest_properties', (req, res) => {
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return the properties within an object wit the date formatted.
+				// Valid and successful request, return the properties within an object wit  the date formatted.
         data = row[0];
         data.backtestDate = moment(data.backtestDate).format('DD/MM/YYYY')
 				res.send(data);
