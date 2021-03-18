@@ -214,7 +214,7 @@ app.patch('/backtest_properties/is_paused', (req, res) => {
 // Listen for PATCH requests to /backtest_properties/is_paused to set the current pause state of the backtest.
 app.patch('/backtest_properties/available', (req, res) => {
 	// Query constructor to get the current the backtest date.
-  const { backtestOnline } = req.body;
+  const backtestOnline  = parseInt(req.body.backtestOnline);
 
   // Query constructor to update the backtest paused state.
   pool.query(`
@@ -232,7 +232,7 @@ app.patch('/backtest_properties/available', (req, res) => {
       // Send the new backtest availability state as an event to the socket connection.
       payload = { backtestOnline: backtestOnline }
       io.emit("backtestPropertiesUpdated", payload);
-      console.log(`Backtest is ${backtestOnline == 1 ? "online" : "offline"}.`)
+      console.log(`Backtest is ${backtestOnline === 1 ? "online" : "offline"}.`)
     }
  });
 })
@@ -391,6 +391,9 @@ app.put('/trades', (req, res) => {
   }
   res.send(result);
   io.emit("tradesUpdated");
+  if(closedTradeValues.length > 0) {
+    io.emit("updateStats");
+  }
 })
 
 // Listen for GET requests to /trades/stats to get the current trade statistics of the backtest from the date specified.
