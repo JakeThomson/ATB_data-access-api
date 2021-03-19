@@ -90,7 +90,9 @@ app.put('/backtest_properties/initialise', (req, res) => {
 				availableBalance = startBalance,
 				totalProfitLoss = 0,
 				totalProfitLossPct = 0,
-        successRate = 0;
+        successRate = 0,
+        tradeStats = {highestProfitTrade: undefined, highestLossTrade: undefined, avgProfitPct: undefined, avgLossPct: undefined, 
+          avgProfitLossPct: undefined, profitFactor: undefined, totalProfitLoss: undefined};
 	var totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph)
 	// Query constructor to update the backtest properties.
 	pool.query(`
@@ -119,7 +121,7 @@ app.put('/backtest_properties/initialise', (req, res) => {
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
+        payload = { backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
         io.emit("backtestPropertiesUpdated", payload);
         io.emit("tradesUpdated");
 			}
