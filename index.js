@@ -272,6 +272,24 @@ app.put('/backtest_properties', (req, res) => {
   });
 })
 
+// Listen for GET requests to /backtest_properties to get the current backtest properties.
+app.get('/backtest_settings', (req, res) => {
+	// Query constructor to get the current the backtest date.
+	pool.query(`SELECT * FROM backtestSettings;`, (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request, return the properties within an object wit the date formatted.
+        data = row[0];
+        data.startDate = moment(data.startDate);
+        data.endDate = moment(data.endDate);
+				res.send(data);
+			}
+	});
+})
+
 // Listen for PUT requests to /backtest_settings to the backtest settings.
 app.put('/backtest_settings', (req, res) => {
   // Extract data from request body.
