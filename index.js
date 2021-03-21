@@ -83,9 +83,9 @@ io.on('connection', (socket) => {
 // Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
 app.put('/backtest_properties/initialise', (req, res) => {
   // Extract data from request body.
-  const { backtest_date: backtestDate, start_balance: startBalance } = req.body;
+  const { start_date: startDate, start_balance: startBalance } = req.body;
 	
-	const startDate = backtestDate,
+	const backtestDate = startDate,
         totalBalance = startBalance,
 				availableBalance = startBalance,
 				totalProfitLoss = 0,
@@ -98,9 +98,7 @@ app.put('/backtest_properties/initialise', (req, res) => {
 	pool.query(`
 		UPDATE backtestProperties
 		  SET
-        startDate = ?,
         backtestDate = ?,
-        startBalance = ?,
         totalBalance = ?,
         availableBalance = ?,
         totalProfitLoss = ?,
@@ -109,7 +107,7 @@ app.put('/backtest_properties/initialise', (req, res) => {
         successRate = ?;
         truncate openTrades;
         truncate closedTrades;`, 
-		[startDate, backtestDate, startBalance, totalBalance, availableBalance, totalProfitLoss, 
+		[backtestDate, totalBalance, availableBalance, totalProfitLoss, 
 			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
@@ -239,35 +237,6 @@ app.patch('/backtest_properties/available', (req, res) => {
  });
 })
 
-// Listen for POST requests to /trades to add a new trade to the open_trades table.
-app.post('/trades', (req, res) => {
-
-  const { ticker, buy_date: buyDate, share_qty: shareQty, investment_total: investmentTotal, buy_price: buyPrice, 
-    current_price: currentPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct } = req.body;
-  
-  const figure = JSON.stringify(req.body.figure);
-
-  // Query constructor to send a new trade to openTrades.
-	pool.query(`
-    INSERT INTO openTrades
-      (ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct)
-    VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-    SELECT LAST_INSERT_ID() AS trade_id;`, 
-  [ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct], (err, row) => {
-    if(err) {
-      console.warn(new Date(), err);
-      // If the MySQL query returned an error, pass the error message onto the client.
-      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-    } else {
-      // Valid and successful request, return the trade_id in the response body.
-      res.send(row[1][0]);
-      // Send an event to the UI to tell it to make a GET request to update the list of trades.
-      io.emit("tradesUpdated");
-    }
-  });
-})
-
 // Listen for PATCH requests to /backtest_properties/date to set a new date value in the backtest.
 app.put('/backtest_properties', (req, res) => {
   // Extract data from request body.
@@ -300,6 +269,65 @@ app.put('/backtest_properties', (req, res) => {
         payload = { totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
         io.emit("backtestPropertiesUpdated", payload);
       }
+  });
+})
+
+// Listen for PUT requests to /backtest_settings to the backtest settings.
+app.put('/backtest_settings', (req, res) => {
+  // Extract data from request body.
+  const { startBalance, marketIndex, capPct, takeProfit, stopLoss } = req.body;
+  const startDate = moment(req.body.startDate).format("YYYY-MM-DD"),
+        endDate = moment(req.body.endDate).format("YYYY-MM-DD");
+  
+  // Query constructor to update the backtest settings.
+  pool.query(`
+    UPDATE backtestSettings
+      SET
+        startDate = ?,
+        endDate = ?,
+        startBalance = ?,
+        marketIndex = ?,
+        capPct = ?,
+        takeProfit = ?,
+        stopLoss = ?;`,
+    [startDate, endDate, startBalance, marketIndex, capPct, takeProfit, stopLoss], (err, row) => {
+      if(err) {
+        console.warn(new Date(), err);
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+      } else {
+        // Valid and successful request.
+        res.send(row);
+      }
+  });
+})
+
+// Listen for POST requests to /trades to add a new trade to the open_trades table.
+app.post('/trades', (req, res) => {
+
+  const { ticker, buy_date: buyDate, share_qty: shareQty, investment_total: investmentTotal, buy_price: buyPrice, 
+    current_price: currentPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct } = req.body;
+  
+  const figure = JSON.stringify(req.body.figure);
+
+  // Query constructor to send a new trade to openTrades.
+	pool.query(`
+    INSERT INTO openTrades
+      (ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct)
+    VALUES
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    SELECT LAST_INSERT_ID() AS trade_id;`, 
+  [ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct], (err, row) => {
+    if(err) {
+      console.warn(new Date(), err);
+      // If the MySQL query returned an error, pass the error message onto the client.
+      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+    } else {
+      // Valid and successful request, return the trade_id in the response body.
+      res.send(row[1][0]);
+      // Send an event to the UI to tell it to make a GET request to update the list of trades.
+      io.emit("tradesUpdated");
+    }
   });
 })
 
