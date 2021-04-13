@@ -513,6 +513,23 @@ app.get('/strategies/modules', (req, res) => {
   });
 })
 
+// Listen for GET requests to /trades to get the current trades in the backtest.
+app.get('/strategies', (req, res) => {
+	// Query constructor to get the current pause state of the backtest.
+	pool.query(`SELECT * FROM strategies;`, (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request, return thepaused state within an object.
+        data = row[0];
+        data.strategyData = JSON.parse(data.strategyData);
+				res.send(data);
+			}
+	});
+})
+
 // Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
 app.put('/strategies', (req, res) => {
   // Extract data from request body.
