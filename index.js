@@ -25,6 +25,8 @@ app.use(function(req, res, next) {
   next();
 });
 
+let backtestSocket = undefined;
+
 // Connect to database using env variables.
 const pool = mysql.createPool({
   host: process.env.MYSQL_HOST,
@@ -78,6 +80,12 @@ io.on('connection', (socket) => {
     // Sent by clients on disconnect.
     console.log('user disconnected');
   });
+
+  socket.on('sendIdentifier', (identifier) => {
+    if(identifier === "backtest") {
+      backtestSocket = socket;
+    }
+  })
 });
 
 // Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
@@ -497,12 +505,18 @@ app.get('/trades/stats', (req, res) => {
 	});
 })
 
+// Listen for GET requests to /trades to get the current trades in the backtest.
+app.get('/strategies/modules', (req, res) => {
+  backtestSocket.emit("getAnalysisModules", null, (result) => {
+    console.log(result);
+    res.send(result);
+  });
+})
+
 // Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
 app.put('/strategies', (req, res) => {
   // Extract data from request body.
   let { strategyName, strategyData, } = req.body;
-
-  console.log(strategyName, strategyData)
 
   strategyData = JSON.stringify(strategyData);
 
