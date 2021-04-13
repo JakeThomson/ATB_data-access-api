@@ -496,3 +496,30 @@ app.get('/trades/stats', (req, res) => {
 			}
 	});
 })
+
+// Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
+app.put('/strategies', (req, res) => {
+  // Extract data from request body.
+  let { strategyName, strategyData, } = req.body;
+
+  console.log(strategyName, strategyData)
+
+  strategyData = JSON.stringify(strategyData);
+
+	// Query constructor to update the backtest properties.
+	pool.query(`
+    UPDATE strategies
+      SET
+        strategyName = ?,
+        strategyData = ?;`, 
+		[strategyName, strategyData], (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request.
+				res.send(row);
+			}
+	});
+})
