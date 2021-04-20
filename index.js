@@ -524,7 +524,7 @@ app.get('/strategies', (req, res) => {
 			} else {
 				// Valid and successful request, return thepaused state within an object.
         data = row[0];
-        data.strategyData = JSON.parse(data.strategyData);
+        data.technicalAnalysis = JSON.parse(data.technicalAnalysis);
 				res.send(data);
 			}
 	});
