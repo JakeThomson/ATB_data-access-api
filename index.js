@@ -25,6 +25,8 @@ app.use(function(req, res, next) {
   next();
 });
 
+let backtestSocket = undefined;
+
 // Connect to database using env variables.
 const pool = mysql.createPool({
   host: process.env.MYSQL_HOST,
@@ -78,6 +80,12 @@ io.on('connection', (socket) => {
     // Sent by clients on disconnect.
     console.log('user disconnected');
   });
+
+  socket.on('sendIdentifier', (identifier) => {
+    if(identifier === "backtest") {
+      backtestSocket = socket;
+    }
+  })
 });
 
 // Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
@@ -493,6 +501,56 @@ app.get('/trades/stats', (req, res) => {
 				const data = {highestProfitTrade, highestLossTrade, avgProfitPct: row[2][0].avgProfitPct, avgLossPct: row[3][0].avgLossPct, 
           avgProfitLossPct: row[4][0].avgProfitLossPct, profitFactor: row[5][0].profitFactor, totalProfitLoss: row[6][0].totalProfitLoss};
 				res.send(data);
+			}
+	});
+})
+
+// Listen for GET requests to /trades to get the current trades in the backtest.
+app.get('/strategies/modules', (req, res) => {
+  backtestSocket.emit("getAnalysisModules", null, (result) => {
+    console.log(result);
+    res.send(result);
+  });
+})
+
+// Listen for GET requests to /trades to get the current trades in the backtest.
+app.get('/strategies', (req, res) => {
+	// Query constructor to get the current pause state of the backtest.
+	pool.query(`SELECT * FROM strategies;`, (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request, return thepaused state within an object.
+        data = row[0];
+        data.technicalAnalysis = JSON.parse(data.technicalAnalysis);
+				res.send(data);
+			}
+	});
+})
+
+// Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
+app.put('/strategies', (req, res) => {
+  // Extract data from request body.
+  let { strategyName, strategyData, } = req.body;
+
+  strategyData = JSON.stringify(strategyData);
+
+	// Query constructor to update the backtest properties.
+	pool.query(`
+    UPDATE strategies
+      SET
+        strategyName = ?,
+        strategyData = ?;`, 
+		[strategyName, strategyData], (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request.
+				res.send(row);
 			}
 	});
 })
