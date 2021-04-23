@@ -224,6 +224,10 @@ app.patch('/backtest_properties/available', (req, res) => {
 	// Query constructor to get the current the backtest date.
   const backtestOnline  = parseInt(req.body.backtestOnline);
 
+  if(backtestOnline === 0) {
+    backtestSocket = undefined;
+  }
+
   // Query constructor to update the backtest paused state.
   pool.query(`
   UPDATE backtestProperties
@@ -529,12 +533,41 @@ app.get('/trades/stats', (req, res) => {
 
 // Listen for GET requests to /trades to get the current trades in the backtest.
 app.get('/strategies/modules', (req, res) => {
+  function updateAvailableModules(modules) {
+
+    let sqlQuery = "truncate availableModules;"
+    let sqlQueryParams = [];
+
+    for (module in modules) {
+      sqlQuery += 'INSERT INTO availableModules (moduleName, formConfiguration) VALUES (?, ?);'
+      sqlQueryParams = sqlQueryParams.concat([module, JSON.stringify(modules[module])]);
+    }
+
+    pool.query(sqlQuery, sqlQueryParams);
+  }
+  
+
   if(backtestSocket !== undefined) {
     backtestSocket.emit("getAnalysisModules", null, (result) => {
+      updateAvailableModules(result);
       res.send(result);
     });
   } else {
-    res.sendStatus(500);
+    // Query constructor to get the current pause state of the backtest.
+    pool.query(`SELECT * FROM availableModules;`, (err, row) => {
+      if(err) {
+        console.warn(new Date(), err);
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+      } else {
+        // Valid and successful request, return the paused state within an object.
+        let data = {}
+        for(let i=0; i<row.length; i++) {
+          data[row[i].moduleName] = JSON.parse(row[i].formConfiguration);
+        }
+        res.send(data);
+      }
+  });
   }
 })
 
@@ -598,7 +631,7 @@ app.get('/strategies/:strategyId', (req, res) => {
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return thepaused state within an object.
+				// Valid and successful request, return the paused state within an object.
         data = row[0]
         if(data !== undefined) {
           data.technicalAnalysis = JSON.parse(data.technicalAnalysis);
