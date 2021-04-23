@@ -531,7 +531,6 @@ app.get('/trades/stats', (req, res) => {
 app.get('/strategies/modules', (req, res) => {
   if(backtestSocket !== undefined) {
     backtestSocket.emit("getAnalysisModules", null, (result) => {
-      console.log(result);
       res.send(result);
     });
   } else {
@@ -560,6 +559,32 @@ app.get('/strategies', (req, res) => {
 				res.send(data);
 			}
 	});
+})
+
+// Listen for POST requests to /trades to add a new trade to the open_trades table.
+app.post('/strategies', (req, res) => {
+
+  // Extract data from request body.
+  let { strategyName, strategyData } = req.body;
+
+  strategyData = JSON.stringify(strategyData)
+
+  // Query constructor to send a new trade to openTrades.
+	pool.query(`
+    INSERT INTO strategies
+      (strategyName, technicalAnalysis, lookbackRangeWeeks, maxWeekPeriod)
+    VALUES
+      (?, ?, ?, ?);`, 
+  [strategyName, strategyData, 34, 40], (err, row) => {
+    if(err) {
+      console.warn(new Date(), err);
+      // If the MySQL query returned an error, pass the error message onto the client.
+      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+    } else {
+      // Valid and successful request, return the trade_id in the response body.
+      res.send(row);
+    }
+  });
 })
 
 // Listen for GET requests to /trades to get the current trades in the backtest.
