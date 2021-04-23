@@ -634,3 +634,32 @@ app.put('/strategies/:strategyId', (req, res) => {
 			}
 	});
 })
+
+// Listen for DELETE requests to /strategies and delete the specified entry in the table.
+app.delete('/strategies/:strategyId', (req, res) => {
+  // Extract data from route parameter.
+  const strategyId  = req.params.strategyId;
+  
+  // Query constructor to remove row from mileageData.
+  pool.query(`DELETE FROM strategies
+              WHERE strategyId = ?;`, [strategyId], (err, row) => {
+    // If requestId does not exist, then it was not provided in the request.
+    if(strategyId === undefined) { 
+      res.status(400).send({devErrorMsg: "Invalid query parameter 'requestId'.", clientErrorMsg: "Internal error."});
+    } else {
+      if(err) {
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+        delete err.stack;
+        console.log(new Date(), err);
+      } else {
+        if(row.affectedRows === 0) {
+          res.status(404).send({devErrorMsg: `RequestId '${strategyId}' doesn't exist in mileage database.`, clientErrorMsg: "Entry no longer exists."});
+        } else {
+          // Valid and successful request.
+          res.send(row);
+        }
+      }
+    }
+  });
+});
