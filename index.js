@@ -72,7 +72,6 @@ io.on('connection', (socket) => {
   })
 
   socket.on('restart', (body) => {
-    console.log(body);
     // Called by the UI to initiate a restart in the backend.
     io.emit('restartBacktest');
   })
@@ -558,6 +557,25 @@ app.get('/strategies', (req, res) => {
           data[i].avgSuccess = Math.round((i+1)*2*13.3),
           data[i].avgReturns = Math.round((i+1)*2*9.3)
         }
+				res.send(data);
+			}
+	});
+})
+
+// Listen for GET requests to /trades to get the current trades in the backtest.
+app.get('/strategies/:strategyId', (req, res) => {
+  const strategyId = req.params.strategyId;
+
+	// Query constructor to get the current pause state of the backtest.
+	pool.query(`SELECT * FROM strategies WHERE strategyId = ?;`, [strategyId], (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request, return thepaused state within an object.
+        data = row[0]
+        data.technicalAnalysis = JSON.parse(data.technicalAnalysis);
 				res.send(data);
 			}
 	});
