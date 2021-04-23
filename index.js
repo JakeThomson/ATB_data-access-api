@@ -600,7 +600,9 @@ app.get('/strategies/:strategyId', (req, res) => {
 			} else {
 				// Valid and successful request, return thepaused state within an object.
         data = row[0]
-        data.technicalAnalysis = JSON.parse(data.technicalAnalysis);
+        if(data !== undefined) {
+          data.technicalAnalysis = JSON.parse(data.technicalAnalysis);
+        }
 				res.send(data);
 			}
 	});
