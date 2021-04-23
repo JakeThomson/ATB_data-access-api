@@ -507,10 +507,14 @@ app.get('/trades/stats', (req, res) => {
 
 // Listen for GET requests to /trades to get the current trades in the backtest.
 app.get('/strategies/modules', (req, res) => {
-  backtestSocket.emit("getAnalysisModules", null, (result) => {
-    console.log(result);
-    res.send(result);
-  });
+  if(backtestSocket !== undefined) {
+    backtestSocket.emit("getAnalysisModules", null, (result) => {
+      console.log(result);
+      res.send(result);
+    });
+  } else {
+    res.sendStatus(500);
+  }
 })
 
 // Listen for GET requests to /trades to get the current trades in the backtest.
@@ -523,8 +527,14 @@ app.get('/strategies', (req, res) => {
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
 				// Valid and successful request, return thepaused state within an object.
-        data = row[0];
-        data.technicalAnalysis = JSON.parse(data.technicalAnalysis);
+        data = row
+        for(i=0; i<row.length; i++){
+          data[i].technicalAnalysis = JSON.parse(data[i].technicalAnalysis);
+          data[i].lastRun = "12m ago", 
+          data[i].active = false, 
+          data[i].avgSuccess = 25,
+          data[i].avgReturns = 21
+        }
 				res.send(data);
 			}
 	});
@@ -542,7 +552,7 @@ app.put('/strategies', (req, res) => {
     UPDATE strategies
       SET
         strategyName = ?,
-        strategyData = ?;`, 
+        technicalAnalysis = ?;`, 
 		[strategyName, strategyData], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
