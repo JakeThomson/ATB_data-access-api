@@ -71,7 +71,8 @@ io.on('connection', (socket) => {
     });
   })
 
-  socket.on('restart', () => {
+  socket.on('restart', (body) => {
+    console.log(body);
     // Called by the UI to initiate a restart in the backend.
     io.emit('restartBacktest');
   })
@@ -328,6 +329,28 @@ app.put('/backtest_settings', (req, res) => {
   });
 })
 
+// Listen for PUT requests to /backtest_settings to the backtest settings.
+app.put('/backtest_settings/strategy', (req, res) => {
+  // Extract data from request body.
+  const { strategyId } = req.body;
+  
+  // Query constructor to update the backtest settings.
+  pool.query(`
+    UPDATE backtestSettings
+      SET
+        strategyId = ?;`,
+    [strategyId], (err, row) => {
+      if(err) {
+        console.warn(new Date(), err);
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+      } else {
+        // Valid and successful request.
+        res.send(row);
+      }
+  });
+})
+
 // Listen for POST requests to /trades to add a new trade to the open_trades table.
 app.post('/trades', (req, res) => {
 
@@ -532,8 +555,8 @@ app.get('/strategies', (req, res) => {
           data[i].technicalAnalysis = JSON.parse(data[i].technicalAnalysis);
           data[i].lastRun = "12m ago", 
           data[i].active = false, 
-          data[i].avgSuccess = 25,
-          data[i].avgReturns = 21
+          data[i].avgSuccess = Math.round((i+1)*2*13.3),
+          data[i].avgReturns = Math.round((i+1)*2*9.3)
         }
 				res.send(data);
 			}
@@ -541,9 +564,11 @@ app.get('/strategies', (req, res) => {
 })
 
 // Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
-app.put('/strategies', (req, res) => {
+app.put('/strategies/:strategyId', (req, res) => {
+
   // Extract data from request body.
   let { strategyName, strategyData, } = req.body;
+  const strategyId = req.params.strategyId;
 
   strategyData = JSON.stringify(strategyData);
 
@@ -552,8 +577,10 @@ app.put('/strategies', (req, res) => {
     UPDATE strategies
       SET
         strategyName = ?,
-        technicalAnalysis = ?;`, 
-		[strategyName, strategyData], (err, row) => {
+        technicalAnalysis = ?
+      WHERE
+        strategyID = ?;`, 
+		[strategyName, strategyData, strategyId], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
