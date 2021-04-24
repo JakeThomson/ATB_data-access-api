@@ -55,7 +55,7 @@ io.on('connection', (socket) => {
     const { backtestOnline } = data
     // Query constructor to update the backtest date.
     pool.query(`
-    UPDATE backtests
+    UPDATE backtestSettings
       SET
         backtestOnline = ?`,
     [backtestOnline], (err, row) => {
@@ -105,12 +105,12 @@ app.post('/backtests/initialise', (req, res) => {
 	// Query constructor to update the backtest properties.
 	pool.query(`
 		INSERT INTO backtests 
-      (backtestDate, datetimeStarted, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, isPaused, totalProfitLossGraph, successRate)
+      (backtestDate, datetimeStarted, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate)
     VALUES
-      (?, NOW(), ?, ?, ?, ?, ?, ?, ?);
+      (?, NOW(), ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS backtestId;`, 
 		[backtestDate, totalBalance, availableBalance, totalProfitLoss, 
-			totalProfitLossPct, 0, totalProfitLossGraph, successRate], (err, row) => {
+			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
@@ -121,7 +121,7 @@ app.post('/backtests/initialise', (req, res) => {
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { backtestId: row[1][0], backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
+        payload = { backtestId: row[1][0].backtestId, backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
         io.emit("backtestUpdated", payload);
         io.emit("tradesUpdated");
 			}
@@ -178,77 +178,6 @@ app.get('/backtests', (req, res) => {
 	});
 })
 
-// Listen for GET requests to /backtests/is_paused to get the current pause state of the backtest.
-app.get('/backtests/is_paused', (req, res) => {
-	// Query constructor to get the current pause state of the backtest.
-	pool.query(`SELECT isPaused FROM backtests;`, (err, row) => {
-			if(err) {
-				console.warn(new Date(), err);
-				// If the MySQL query returned an error, pass the error message onto the client.
-				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-			} else {
-				// Valid and successful request, return thepaused state within an object.
-        data = row[0];
-				res.send(data);
-			}
-	});
-})
-
-// Listen for PATCH requests to /backtests/is_paused to set the current pause state of the backtest.
-app.patch('/backtests/is_paused', (req, res) => {
-	// Query constructor to get the current the backtest date.
-  const { isPaused } = req.body;
-
-	 // Query constructor to update the backtest paused state.
-   pool.query(`
-   UPDATE backtests
-     SET
-       isPaused = ?`,
-   [isPaused], (err, row) => {
-     if(err) {
-       console.warn(new Date(), err);
-       // If the MySQL query returned an error, pass the error message onto the client.
-       res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-     } else {
-       // Valid and successful request.
-       res.send(row);
-       // Send the new paused state as an event to the socket connection.
-       payload = { isPaused: isPaused }
-       io.emit("backtestUpdated", payload);
-       io.emit("playpause", payload);
-     }
- });
-})
-
-// Listen for PATCH requests to /backtests/is_paused to set the current pause state of the backtest.
-app.patch('/backtests/available', (req, res) => {
-	// Query constructor to get the current the backtest date.
-  const backtestOnline  = parseInt(req.body.backtestOnline);
-
-  if(backtestOnline === 0) {
-    backtestSocket = undefined;
-  }
-
-  // Query constructor to update the backtest paused state.
-  pool.query(`
-  UPDATE backtests
-    SET
-      backtestOnline = ?`,
-  [backtestOnline], (err, row) => {
-    if(err) {
-      console.warn(new Date(), err);
-      // If the MySQL query returned an error, pass the error message onto the client.
-      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-    } else {
-      // Valid and successful request.
-      res.send(row);
-      // Send the new backtest availability state as an event to the socket connection.
-      payload = { backtestOnline: backtestOnline }
-      io.emit("backtestUpdated", payload);
-      console.log(`Backtest is ${backtestOnline === 1 ? "online" : "offline"}.`)
-    }
- });
-})
 
 // Listen for PATCH requests to /backtests/date to set a new date value in the backtest.
 app.put('/backtests', (req, res) => {
@@ -332,6 +261,77 @@ app.put('/backtest_settings', (req, res) => {
         res.send(row);
       }
   });
+})
+// Listen for GET requests to /backtests/is_paused to get the current pause state of the backtest.
+app.get('/backtest_settings/is_paused', (req, res) => {
+	// Query constructor to get the current pause state of the backtest.
+	pool.query(`SELECT isPaused FROM backtestSettings;`, (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request, return thepaused state within an object.
+        data = row[0];
+				res.send(data);
+			}
+	});
+})
+
+// Listen for PATCH requests to /backtests/is_paused to set the current pause state of the backtest.
+app.patch('/backtest_settings/is_paused', (req, res) => {
+	// Query constructor to get the current the backtest date.
+  const { isPaused } = req.body;
+
+	 // Query constructor to update the backtest paused state.
+   pool.query(`
+   UPDATE backtestSettings
+     SET
+       isPaused = ?`,
+   [isPaused], (err, row) => {
+     if(err) {
+       console.warn(new Date(), err);
+       // If the MySQL query returned an error, pass the error message onto the client.
+       res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+     } else {
+       // Valid and successful request.
+       res.send(row);
+       // Send the new paused state as an event to the socket connection.
+       payload = { isPaused: isPaused }
+       io.emit("backtestUpdated", payload);
+       io.emit("playpause", payload);
+     }
+ });
+})
+
+// Listen for PATCH requests to /backtests/is_paused to set the current pause state of the backtest.
+app.patch('/backtest_settings/available', (req, res) => {
+	// Query constructor to get the current the backtest date.
+  const backtestOnline  = parseInt(req.body.backtestOnline);
+
+  if(backtestOnline === 0) {
+    backtestSocket = undefined;
+  }
+
+  // Query constructor to update the backtest paused state.
+  pool.query(`
+  UPDATE backtestSettings
+    SET
+      backtestOnline = ?`,
+  [backtestOnline], (err, row) => {
+    if(err) {
+      console.warn(new Date(), err);
+      // If the MySQL query returned an error, pass the error message onto the client.
+      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+    } else {
+      // Valid and successful request.
+      res.send(row);
+      // Send the new backtest availability state as an event to the socket connection.
+      payload = { backtestOnline: backtestOnline }
+      io.emit("backtestUpdated", payload);
+      console.log(`Backtest is ${backtestOnline === 1 ? "online" : "offline"}.`)
+    }
+ });
 })
 
 // Listen for PUT requests to /backtest_settings to the backtest settings.
