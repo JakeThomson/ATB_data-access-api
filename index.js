@@ -129,7 +129,9 @@ app.post('/backtests/initialise', (req, res) => {
 })
 
 // Listen for PATCH requests to /backtests/date to set a new date value in the backtest.
-app.patch('/backtests/date', (req, res) => {
+app.patch('/backtests/:backtestId/date', (req, res) => {
+  const backtestId = parseInt(req.params.backtestId);
+
   // Extract data from request body.
   const { backtest_date: backtestDate } = req.body;
 
@@ -137,8 +139,9 @@ app.patch('/backtests/date', (req, res) => {
   pool.query(`
     UPDATE backtests
       SET
-        backtestDate = ?`,
-    [backtestDate], (err, row) => {
+        backtestDate = ?
+      WHERE backtestId = ?`,
+    [backtestDate, backtestId], (err, row) => {
       if(err) {
         console.warn(new Date(), err);
         // If the MySQL query returned an error, pass the error message onto the client.
@@ -178,9 +181,10 @@ app.get('/backtests', (req, res) => {
 	});
 })
 
-
 // Listen for PATCH requests to /backtests/date to set a new date value in the backtest.
-app.put('/backtests', (req, res) => {
+app.put('/backtests/:backtestId', (req, res) => {
+  const backtestId = parseInt(req.params.backtestId);
+
   // Extract data from request body.
   const { total_balance: totalBalance, available_balance: availableBalance, total_profit_loss: totalProfitLoss, total_profit_loss_pct: totalProfitLossPct } = req.body;
   
@@ -195,9 +199,10 @@ app.put('/backtests', (req, res) => {
         totalProfitLoss = ?,
         totalProfitLossPct = ?,
         totalProfitLossGraph = ?,
-        successRate = IFNULL((SELECT (SUM(profitLoss >= 0)/count(*))*100 FROM closedTrades), 0);
+        successRate = IFNULL((SELECT (SUM(profitLoss >= 0)/count(*))*100 FROM closedTrades), 0)
+      WHERE backtestId = ?;
         SELECT (SUM(profitLoss >= 0)/count(*))*100 AS 'successRate' FROM closedTrades;`,
-    [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph], (err, row) => {
+    [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, backtestId], (err, row) => {
       if(err) {
         console.warn(new Date(), err);
         // If the MySQL query returned an error, pass the error message onto the client.
@@ -493,7 +498,7 @@ app.put('/trades/:backtestId', (req, res) => {
 
   // Generate MySQL query string and inputs, to allow the backtest to add all required trades in the closedTrades table.
   closedTrades.forEach(trade => {
-    const {trade_id: tradeId, backtest_id: backtestId, ticker, buy_date: buyDate, sell_date: sellDate, share_qty: shareQty, investment_total: investmentTotal, profit_loss: profitLoss,
+    const {trade_id: tradeId, ticker, buy_date: buyDate, sell_date: sellDate, share_qty: shareQty, investment_total: investmentTotal, profit_loss: profitLoss,
       buy_price: buyPrice, sell_price: sellPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct} = trade;
     const figure = JSON.stringify(trade.figure);
     values = [tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, sellPrice, takeProfit, stopLoss, figure, profitLossPct, tradeId];
