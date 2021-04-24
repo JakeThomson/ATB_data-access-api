@@ -614,15 +614,16 @@ app.post('/strategies', (req, res) => {
     INSERT INTO strategies
       (strategyName, technicalAnalysis, lookbackRangeWeeks, maxWeekPeriod)
     VALUES
-      (?, ?, ?, ?);`, 
+      (?, ?, ?, ?);
+    SELECT LAST_INSERT_ID() AS strategyId;`, 
   [strategyName, strategyData, 34, 40], (err, row) => {
     if(err) {
       console.warn(new Date(), err);
       // If the MySQL query returned an error, pass the error message onto the client.
       res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
     } else {
-      // Valid and successful request.
-      res.send(row);
+      // Valid and successful request, return the strategyId in the response body.
+      res.send(row[1][0]);
     }
   });
 })
@@ -700,6 +701,8 @@ app.delete('/strategies/:strategyId', (req, res) => {
           res.status(404).send({devErrorMsg: `RequestId '${strategyId}' doesn't exist in mileage database.`, clientErrorMsg: "Entry no longer exists."});
         } else {
           // Valid and successful request.
+          // Emit message for backtest to stop backtest if it is running the strategy just deleted.
+          backtestSocket.emit("getAnalysisModules", strategyId);
           res.send(row);
         }
       }
