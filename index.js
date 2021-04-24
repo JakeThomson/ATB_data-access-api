@@ -531,13 +531,15 @@ app.get('/trades/stats', (req, res) => {
 	});
 })
 
-// Listen for GET requests to /trades to get the current trades in the backtest.
+// Listen for GET requests to /strategies/modules to get the current available modules from the backend, OR from the databse if backend is offline.
 app.get('/strategies/modules', (req, res) => {
-  function updateAvailableModules(modules) {
 
+  // Called if backtest is online.
+  function updateAvailableModules(modules) {
+    // Query string builder to execute multiple requests in one connection. 
+    // Start with 
     let sqlQuery = "truncate availableModules;"
     let sqlQueryParams = [];
-
     for (module in modules) {
       sqlQuery += 'INSERT INTO availableModules (moduleName, formConfiguration) VALUES (?, ?);'
       sqlQueryParams = sqlQueryParams.concat([module, JSON.stringify(modules[module])]);
@@ -546,13 +548,16 @@ app.get('/strategies/modules', (req, res) => {
     pool.query(sqlQuery, sqlQueryParams);
   }
   
-
+  // If the backtest socket connection can be idenfified (is online), then get available modules from the backtesting platform.
   if(backtestSocket !== undefined) {
+    // Emit message for backtest to receive and return data.
     backtestSocket.emit("getAnalysisModules", null, (result) => {
+      // Update available module data in databse cache.
       updateAvailableModules(result);
       res.send(result);
     });
   } else {
+    // If  backtest socket connection cannot be idenfified (is offline), then get cached available modules from database.
     // Query constructor to get the current pause state of the backtest.
     pool.query(`SELECT * FROM availableModules;`, (err, row) => {
       if(err) {
@@ -560,7 +565,7 @@ app.get('/strategies/modules', (req, res) => {
         // If the MySQL query returned an error, pass the error message onto the client.
         res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
       } else {
-        // Valid and successful request, return the paused state within an object.
+        // Valid and successful request, format data and return.
         let data = {}
         for(let i=0; i<row.length; i++) {
           data[row[i].moduleName] = JSON.parse(row[i].formConfiguration);
@@ -571,16 +576,16 @@ app.get('/strategies/modules', (req, res) => {
   }
 })
 
-// Listen for GET requests to /trades to get the current trades in the backtest.
+// Listen for GET requests to /strategies to get the current saved strategies in the databse.
 app.get('/strategies', (req, res) => {
-	// Query constructor to get the current pause state of the backtest.
+	// Query constructor to get the current saved strategies.
 	pool.query(`SELECT * FROM strategies;`, (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return thepaused state within an object.
+				// Valid and successful request, format data and return.
         data = row
         for(i=0; i<row.length; i++){
           data[i].technicalAnalysis = JSON.parse(data[i].technicalAnalysis);
@@ -594,15 +599,16 @@ app.get('/strategies', (req, res) => {
 	});
 })
 
-// Listen for POST requests to /trades to add a new trade to the open_trades table.
+// Listen for POST requests to /strategies to add a new strategy to the database.
 app.post('/strategies', (req, res) => {
 
   // Extract data from request body.
   let { strategyName, strategyData } = req.body;
 
+  // Convert json object into json string that can be accepted by the database.
   strategyData = JSON.stringify(strategyData)
 
-  // Query constructor to send a new trade to openTrades.
+  // Query constructor to send a new strategu to the database.
 	pool.query(`
     INSERT INTO strategies
       (strategyName, technicalAnalysis, lookbackRangeWeeks, maxWeekPeriod)
@@ -614,24 +620,24 @@ app.post('/strategies', (req, res) => {
       // If the MySQL query returned an error, pass the error message onto the client.
       res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
     } else {
-      // Valid and successful request, return the trade_id in the response body.
+      // Valid and successful request.
       res.send(row);
     }
   });
 })
 
-// Listen for GET requests to /trades to get the current trades in the backtest.
+// Listen for GET requests to /strategies/:strategyId to get information on a specific strategy.
 app.get('/strategies/:strategyId', (req, res) => {
   const strategyId = req.params.strategyId;
 
-	// Query constructor to get the current pause state of the backtest.
+	// Query constructor to get infor on backtest.
 	pool.query(`SELECT * FROM strategies WHERE strategyId = ?;`, [strategyId], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return the paused state within an object.
+				// Valid and successful request, parse the json technical analysis data and return the results.
         data = row[0]
         if(data !== undefined) {
           data.technicalAnalysis = JSON.parse(data.technicalAnalysis);
@@ -641,7 +647,7 @@ app.get('/strategies/:strategyId', (req, res) => {
 	});
 })
 
-// Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
+// Listen for PUT requests to /strategies/:strategyId and update the specified strategy.
 app.put('/strategies/:strategyId', (req, res) => {
 
   // Extract data from request body.
@@ -650,7 +656,7 @@ app.put('/strategies/:strategyId', (req, res) => {
 
   strategyData = JSON.stringify(strategyData);
 
-	// Query constructor to update the backtest properties.
+	// Query constructor to update the specified strategy.
 	pool.query(`
     UPDATE strategies
       SET
@@ -675,12 +681,12 @@ app.delete('/strategies/:strategyId', (req, res) => {
   // Extract data from route parameter.
   const strategyId  = req.params.strategyId;
   
-  // Query constructor to remove row from mileageData.
+  // Query constructor to remove row from strategies.
   pool.query(`DELETE FROM strategies
               WHERE strategyId = ?;`, [strategyId], (err, row) => {
-    // If requestId does not exist, then it was not provided in the request.
+    // If strategyId does not exist, then it was not provided in the request.
     if(strategyId === undefined) { 
-      res.status(400).send({devErrorMsg: "Invalid query parameter 'requestId'.", clientErrorMsg: "Internal error."});
+      res.status(400).send({devErrorMsg: "Invalid query parameter 'strategyId'.", clientErrorMsg: "Internal error."});
     } else {
       if(err) {
         // If the MySQL query returned an error, pass the error message onto the client.
@@ -689,6 +695,7 @@ app.delete('/strategies/:strategyId', (req, res) => {
         console.log(new Date(), err);
       } else {
         if(row.affectedRows === 0) {
+          // If no rows are affected, then there was no strategy with an ID that matched the provided strategyId.
           res.status(404).send({devErrorMsg: `RequestId '${strategyId}' doesn't exist in mileage database.`, clientErrorMsg: "Entry no longer exists."});
         } else {
           // Valid and successful request.
