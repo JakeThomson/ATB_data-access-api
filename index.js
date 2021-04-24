@@ -55,7 +55,7 @@ io.on('connection', (socket) => {
     const { backtestOnline } = data
     // Query constructor to update the backtest date.
     pool.query(`
-    UPDATE backtestProperties
+    UPDATE backtests
       SET
         backtestOnline = ?`,
     [backtestOnline], (err, row) => {
@@ -66,7 +66,7 @@ io.on('connection', (socket) => {
         // Valid and successful request.
         // Send the new date as an event to the socket connection.
         payload = { backtestOnline: backtestOnline }
-        io.emit("backtestPropertiesUpdated", payload);
+        io.emit("backtestUpdated", payload);
       }
     });
   })
@@ -104,7 +104,7 @@ app.put('/backtest_properties/initialise', (req, res) => {
 	var totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph)
 	// Query constructor to update the backtest properties.
 	pool.query(`
-		UPDATE backtestProperties
+		UPDATE backtests
 		  SET
         backtestDate = ?,
         totalBalance = ?,
@@ -128,7 +128,7 @@ app.put('/backtest_properties/initialise', (req, res) => {
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
         payload = { backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
-        io.emit("backtestPropertiesUpdated", payload);
+        io.emit("backtestUpdated", payload);
         io.emit("tradesUpdated");
 			}
 	});
@@ -141,7 +141,7 @@ app.patch('/backtest_properties/date', (req, res) => {
 
   // Query constructor to update the backtest date.
   pool.query(`
-    UPDATE backtestProperties
+    UPDATE backtests
       SET
         backtestDate = ?`,
     [backtestDate], (err, row) => {
@@ -155,7 +155,7 @@ app.patch('/backtest_properties/date', (req, res) => {
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         payload = { backtestDate: formattedDate }
-        io.emit("backtestPropertiesUpdated", payload);
+        io.emit("backtestUpdated", payload);
       }
   });
 })
@@ -163,7 +163,7 @@ app.patch('/backtest_properties/date', (req, res) => {
 // Listen for GET requests to /backtest_properties to get the current backtest properties.
 app.get('/backtest_properties', (req, res) => {
 	// Query constructor to get the current the backtest date.
-	pool.query(`SELECT * FROM backtestProperties;`, (err, row) => {
+	pool.query(`SELECT * FROM backtests;`, (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
@@ -180,7 +180,7 @@ app.get('/backtest_properties', (req, res) => {
 // Listen for GET requests to /backtest_properties/is_paused to get the current pause state of the backtest.
 app.get('/backtest_properties/is_paused', (req, res) => {
 	// Query constructor to get the current pause state of the backtest.
-	pool.query(`SELECT isPaused FROM backtestProperties;`, (err, row) => {
+	pool.query(`SELECT isPaused FROM backtests;`, (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
@@ -200,7 +200,7 @@ app.patch('/backtest_properties/is_paused', (req, res) => {
 
 	 // Query constructor to update the backtest paused state.
    pool.query(`
-   UPDATE backtestProperties
+   UPDATE backtests
      SET
        isPaused = ?`,
    [isPaused], (err, row) => {
@@ -213,7 +213,7 @@ app.patch('/backtest_properties/is_paused', (req, res) => {
        res.send(row);
        // Send the new paused state as an event to the socket connection.
        payload = { isPaused: isPaused }
-       io.emit("backtestPropertiesUpdated", payload);
+       io.emit("backtestUpdated", payload);
        io.emit("playpause", payload);
      }
  });
@@ -230,7 +230,7 @@ app.patch('/backtest_properties/available', (req, res) => {
 
   // Query constructor to update the backtest paused state.
   pool.query(`
-  UPDATE backtestProperties
+  UPDATE backtests
     SET
       backtestOnline = ?`,
   [backtestOnline], (err, row) => {
@@ -243,7 +243,7 @@ app.patch('/backtest_properties/available', (req, res) => {
       res.send(row);
       // Send the new backtest availability state as an event to the socket connection.
       payload = { backtestOnline: backtestOnline }
-      io.emit("backtestPropertiesUpdated", payload);
+      io.emit("backtestUpdated", payload);
       console.log(`Backtest is ${backtestOnline === 1 ? "online" : "offline"}.`)
     }
  });
@@ -258,7 +258,7 @@ app.put('/backtest_properties', (req, res) => {
   
   // Query constructor to update the backtest properties.
   pool.query(`
-    UPDATE backtestProperties
+    UPDATE backtests
       SET
         totalBalance = ?,
         availableBalance = ?,
@@ -279,7 +279,7 @@ app.put('/backtest_properties', (req, res) => {
         // Send the new date as an event to the socket connection.
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
         payload = { totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
-        io.emit("backtestPropertiesUpdated", payload);
+        io.emit("backtestUpdated", payload);
       }
   });
 })
@@ -681,7 +681,7 @@ app.put('/strategies/:strategyId', (req, res) => {
 // Listen for DELETE requests to /strategies and delete the specified entry in the table.
 app.delete('/strategies/:strategyId', (req, res) => {
   // Extract data from route parameter.
-  const strategyId  = req.params.strategyId;
+  const strategyId  = parseInt(req.params.strategyId);
   
   // Query constructor to remove row from strategies.
   pool.query(`DELETE FROM strategies
@@ -702,7 +702,7 @@ app.delete('/strategies/:strategyId', (req, res) => {
         } else {
           // Valid and successful request.
           // Emit message for backtest to stop backtest if it is running the strategy just deleted.
-          backtestSocket.emit("getAnalysisModules", strategyId);
+          backtestSocket.emit("stopBacktest", strategyId, "Strategy in use was deleted");
           res.send(row);
         }
       }
