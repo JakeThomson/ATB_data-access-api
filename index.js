@@ -287,7 +287,8 @@ app.put('/backtest_properties', (req, res) => {
 // Listen for GET requests to /backtest_properties to get the current backtest properties.
 app.get('/backtest_settings', (req, res) => {
 	// Query constructor to get the current the backtest date.
-	pool.query(`SELECT * FROM backtestSettings;`, (err, row) => {
+	pool.query(`SELECT backtestSettings.*, strategies.strategyName FROM backtestSettings
+              LEFT JOIN strategies ON (backtestSettings.strategyId=strategies.strategyId);`, (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
