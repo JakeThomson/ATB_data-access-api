@@ -132,7 +132,7 @@ app.post('/backtests', (req, res) => {
 		INSERT INTO backtests 
       (backtestDate, strategyId, datetimeStarted, active, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate)
     VALUES
-      (?, ?, CONVERT_TZ(NOW(),'SYSTEM','+1:00'), 1, ?, ?, ?, ?, ?, ?);
+      (?, ?, NOW(), 1, ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS backtestId;`, 
 		[strategyId, backtestDate, strategyId, totalBalance, availableBalance, totalProfitLoss, 
 			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
@@ -229,7 +229,7 @@ app.put('/backtests/:backtestId/finalise', (req, res) => {
   pool.query(`
     UPDATE backtests
       SET
-        datetimeFinished = CONVERT_TZ(NOW(),'SYSTEM','+1:00'),
+        datetimeFinished = NOW(),
         active = 0
       WHERE backtestId = ?;`,
     [backtestId], (err, row) => {
@@ -395,6 +395,7 @@ app.post('/trades/:backtestId', (req, res) => {
     current_price: currentPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct } = req.body;
   
   const figure = JSON.stringify(req.body.figure);
+  const priceGaugeFigure = JSON.stringify(req.body.priceGaugeFigure);
 
   // Query constructor to send a new trade to openTrades.
 	pool.query(`
@@ -418,7 +419,8 @@ app.post('/trades/:backtestId', (req, res) => {
 })
 
 // Listen for GET requests to /trades/stats to get the current trade statistics of the backtest from the date specified.
-app.get('/trades/stats', (req, res) => {
+app.get('/trades/:backtestId/stats', (req, res) => {
+  const backtestId = parseInt(req.params.backtestId);
   const date = req.query.date;
 
   if(date === undefined) {
@@ -426,28 +428,33 @@ app.get('/trades/stats', (req, res) => {
     res.status(400).send("Invalid query.");
   }
 
-  const sqlParamArray = Array(8).fill(date);
+  var sqlParamArray = [];
+  for (var i = 0; i < 8; i++) {
+    sqlParamArray.push(backtestId);
+    sqlParamArray.push(date);
+  }
+  sqlParamArray.push(backtestId);
 	// Query constructor to get all current backtest stats.
 	pool.query(`
     SELECT *
       FROM closedTrades
-        WHERE profitLossPct = (SELECT MAX(profitLossPct) FROM closedTrades WHERE profitLoss > 0 AND sellDate >= ?);
+        WHERE profitLossPct = (SELECT MAX(profitLossPct) FROM closedTrades WHERE backtestId=? AND profitLoss > 0 AND sellDate >= ?);
     SELECT *
       FROM closedTrades
-        WHERE profitLossPct = (SELECT MIN(profitLossPct) FROM closedTrades WHERE profitLoss < 0 AND sellDate >= ?);
+        WHERE profitLossPct = (SELECT MIN(profitLossPct) FROM closedTrades WHERE backtestId=? AND profitLoss < 0 AND sellDate >= ?);
     SELECT AVG(profitLossPct) AS avgProfitPct
       FROM closedTrades
-        WHERE profitLossPct > 0 AND sellDate >= ?;
+        WHERE backtestId=? AND profitLossPct > 0 AND sellDate >= ?;
     SELECT AVG(profitLossPct) AS avgLossPct
       FROM closedTrades
-        WHERE profitLossPct < 0 AND sellDate >= ?;
+        WHERE backtestId=? AND profitLossPct < 0 AND sellDate >= ?;
     SELECT AVG(profitLossPct) as avgProfitLossPct
       FROM closedTrades
-        WHERE sellDate > ?;
-    SELECT (SELECT COUNT(profitLoss) FROM closedTrades WHERE profitLoss > 0 AND sellDate >= ?)/
-          (SELECT COUNT(profitLoss) FROM closedTrades WHERE profitLoss < 0 AND sellDate >= ?) AS profitFactor;
-    SELECT (SELECT SUM(profitLoss) FROM closedTrades WHERE sellDate >= ?)/
-          (SELECT COUNT(profitLoss) FROM closedTrades) * 100 AS totalProfitLoss;`,
+        WHERE backtestId=? AND sellDate > ?;
+    SELECT (SELECT COUNT(profitLoss) FROM closedTrades WHERE backtestId=? AND profitLoss > 0 AND sellDate >= ?)/
+          (SELECT COUNT(profitLoss) FROM closedTrades WHERE backtestId=? AND profitLoss < 0 AND sellDate >= ?) AS profitFactor;
+    SELECT (SELECT SUM(profitLoss) FROM closedTrades WHERE backtestId=? AND sellDate >= ?)/
+          (SELECT COUNT(profitLoss) FROM closedTrades WHERE  backtestId=?) * 100 AS totalProfitLoss;`,
           sqlParamArray, (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
