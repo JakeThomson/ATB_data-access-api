@@ -112,7 +112,7 @@ app.get('/backtests', (req, res) => {
 	});
 })
 
-// Listen for PUT requests to /backtests/initialise and re-initialise the backtest properties.
+// Listen for POST requests to /backtests and create a new backtest.
 app.post('/backtests', (req, res) => {
   // Extract data from request body.
   const { start_date: startDate, start_balance: startBalance, strategy_id: strategyId } = req.body;
@@ -128,12 +128,13 @@ app.post('/backtests', (req, res) => {
 	var totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph)
 	// Query constructor to update the backtest properties.
 	pool.query(`
+    DELETE FROM backtests WHERE backtests.strategyId=? AND datetimeFinished is null;
 		INSERT INTO backtests 
-      (backtestDate, strategyId, datetimeStarted, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate)
+      (backtestDate, strategyId, datetimeStarted, active, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate)
     VALUES
-      (?, ?, CONVERT_TZ(NOW(),'SYSTEM','+1:00'), ?, ?, ?, ?, ?, ?);
+      (?, ?, CONVERT_TZ(NOW(),'SYSTEM','+1:00'), 1, ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS backtestId;`, 
-		[backtestDate, strategyId, totalBalance, availableBalance, totalProfitLoss, 
+		[strategyId, backtestDate, strategyId, totalBalance, availableBalance, totalProfitLoss, 
 			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
@@ -141,11 +142,11 @@ app.post('/backtests', (req, res) => {
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
 				// Valid and successful request, return the backtestId in the response body.
-        res.send(row[1][0]);
+        res.send(row[2][0]);
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { backtestId: row[1][0].backtestId, backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
+        payload = { backtestId: row[2][0].backtestId, backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
         io.emit("backtestUpdated", payload);
         io.emit("tradesUpdated");
 			}
@@ -213,7 +214,7 @@ app.put('/backtests/:backtestId', (req, res) => {
         const successRate = row[1][0].successRate;
         // Send the new date as an event to the socket connection.
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
+        payload = { backtestId, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
         io.emit("backtestUpdated", payload);
       }
   });
@@ -228,7 +229,8 @@ app.put('/backtests/:backtestId/finalise', (req, res) => {
   pool.query(`
     UPDATE backtests
       SET
-        datetimeFinished = CONVERT_TZ(NOW(),'SYSTEM','+1:00')
+        datetimeFinished = CONVERT_TZ(NOW(),'SYSTEM','+1:00'),
+        active = 0
       WHERE backtestId = ?;`,
     [backtestId], (err, row) => {
       if(err) {
@@ -618,8 +620,6 @@ app.get('/strategies', (req, res) => {
         data = row
         for(i=0; i<row.length; i++){
           data[i].technicalAnalysis = JSON.parse(data[i].technicalAnalysis);
-          data[i].lastRun = "12m ago", 
-          data[i].active = false
         }
         resolve(data);
       });
@@ -629,7 +629,7 @@ app.get('/strategies', (req, res) => {
   function getBacktests(strategyId) {
     return new Promise(function(resolve, reject) {
       // Query constructor to get the current saved strategies.
-	    pool.query(`SELECT * FROM backtests WHERE strategyId = ? AND datetimeFinished IS NOT NULL ORDER BY datetimeFinished DESC LIMIT 10;`, [strategyId], (err, row) => {
+	    pool.query(`SELECT * FROM backtests WHERE strategyId = ? AND (datetimeFinished is not null OR active=1) ORDER BY datetimeStarted DESC LIMIT 10;`, [strategyId], (err, row) => {
         if(err) {
           console.warn(new Date(), err);
           // If the MySQL query returned an error, pass the error message onto the client.
@@ -647,17 +647,23 @@ app.get('/strategies', (req, res) => {
       const backtests = await getBacktests(strategies[i].strategyId);
       let sumSuccessRate = 0;
       let sumReturns = 0;
+      let numActive = 0;
 
       backtests.forEach((backtest) => {
         backtest.totalProfitLossGraph = JSON.parse(JSON.parse(backtest.totalProfitLossGraph))
-        sumSuccessRate += backtest.successRate;
-        sumReturns += backtest.totalProfitLossPct;
+        if(backtest.active === 1) {
+          numActive += 1;
+        } else {
+          sumSuccessRate += backtest.successRate;
+          sumReturns += backtest.totalProfitLossPct;
+        }
       });
       let avgSuccessRate = "N/A";
       let avgReturns = "N/A";
       if(backtests.length > 0) {
-        avgSuccessRate = Math.round((sumSuccessRate/backtests.length)*10)/10;
-        avgReturns = sumReturns/backtests.length;
+        avgSuccessRate = Math.round((sumSuccessRate/(backtests.length - numActive))*10)/10;
+        avgReturns = sumReturns/(backtests.length - numActive);
+        strategies[i].active = (backtests[0].active === 1);
       }
       strategies[i].backtests = backtests;
       strategies[i].avgSuccess = avgSuccessRate;
