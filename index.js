@@ -55,7 +55,7 @@ io.on('connection', (socket) => {
     const { backtestOnline } = data
     // Query constructor to update the backtest date.
     pool.query(`
-    UPDATE backtestProperties
+    UPDATE backtestSettings
       SET
         backtestOnline = ?`,
     [backtestOnline], (err, row) => {
@@ -66,7 +66,7 @@ io.on('connection', (socket) => {
         // Valid and successful request.
         // Send the new date as an event to the socket connection.
         payload = { backtestOnline: backtestOnline }
-        io.emit("backtestPropertiesUpdated", payload);
+        io.emit("backtestUpdated", payload);
       }
     });
   })
@@ -88,82 +88,17 @@ io.on('connection', (socket) => {
   })
 });
 
-// Listen for PUT requests to /backtest_properties/initialise and re-initialise the backtest properties.
-app.put('/backtest_properties/initialise', (req, res) => {
-  // Extract data from request body.
-  const { start_date: startDate, start_balance: startBalance } = req.body;
-	
-	const backtestDate = startDate,
-        totalBalance = startBalance,
-				availableBalance = startBalance,
-				totalProfitLoss = 0,
-				totalProfitLossPct = 0,
-        successRate = 0,
-        tradeStats = {highestProfitTrade: undefined, highestLossTrade: undefined, avgProfitPct: undefined, avgLossPct: undefined, 
-          avgProfitLossPct: undefined, profitFactor: undefined, totalProfitLoss: undefined};
-	var totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph)
-	// Query constructor to update the backtest properties.
-	pool.query(`
-		UPDATE backtestProperties
-		  SET
-        backtestDate = ?,
-        totalBalance = ?,
-        availableBalance = ?,
-        totalProfitLoss = ?,
-        totalProfitLossPct = ?,
-        totalProfitLossGraph = ?,
-        successRate = ?;
-        truncate openTrades;
-        truncate closedTrades;`, 
-		[backtestDate, totalBalance, availableBalance, totalProfitLoss, 
-			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
-			if(err) {
-				console.warn(new Date(), err);
-				// If the MySQL query returned an error, pass the error message onto the client.
-				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-			} else {
-				// Valid and successful request.
-				res.send(row);
-        // Send the new date as an event to the socket connection.
-        formattedDate = moment(backtestDate).format('DD/MM/YYYY')
-        totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
-        io.emit("backtestPropertiesUpdated", payload);
-        io.emit("tradesUpdated");
-			}
-	});
-})
-
-// Listen for PATCH requests to /backtest_properties/date to set a new date value in the backtest.
-app.patch('/backtest_properties/date', (req, res) => {
-  // Extract data from request body.
-  const { backtest_date: backtestDate } = req.body;
-
-  // Query constructor to update the backtest date.
-  pool.query(`
-    UPDATE backtestProperties
-      SET
-        backtestDate = ?`,
-    [backtestDate], (err, row) => {
-      if(err) {
-        console.warn(new Date(), err);
-        // If the MySQL query returned an error, pass the error message onto the client.
-        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-      } else {
-        // Valid and successful request.
-        res.send(row);
-        // Send the new date as an event to the socket connection.
-        formattedDate = moment(backtestDate).format('DD/MM/YYYY')
-        payload = { backtestDate: formattedDate }
-        io.emit("backtestPropertiesUpdated", payload);
-      }
-  });
-})
-
-// Listen for GET requests to /backtest_properties to get the current backtest properties.
-app.get('/backtest_properties', (req, res) => {
+// Listen for GET requests to /backtests to get the current backtest properties.
+app.get('/backtests', (req, res) => {
 	// Query constructor to get the current the backtest date.
-	pool.query(`SELECT * FROM backtestProperties;`, (err, row) => {
+	pool.query(`
+        SELECT
+            backtests.*, backtestSettings.startDate
+        FROM
+            backtests
+        INNER JOIN
+            backtestSettings
+        ORDER BY backtestId DESC LIMIT 1;`, (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
@@ -177,80 +112,80 @@ app.get('/backtest_properties', (req, res) => {
 	});
 })
 
-// Listen for GET requests to /backtest_properties/is_paused to get the current pause state of the backtest.
-app.get('/backtest_properties/is_paused', (req, res) => {
-	// Query constructor to get the current pause state of the backtest.
-	pool.query(`SELECT isPaused FROM backtestProperties;`, (err, row) => {
+// Listen for POST requests to /backtests and create a new backtest.
+app.post('/backtests', (req, res) => {
+  // Extract data from request body.
+  const { start_date: startDate, start_balance: startBalance, strategy_id: strategyId } = req.body;
+	
+	const backtestDate = startDate,
+        totalBalance = startBalance,
+				availableBalance = startBalance,
+				totalProfitLoss = 0,
+				totalProfitLossPct = 0,
+        successRate = 0,
+        tradeStats = {highestProfitTrade: undefined, highestLossTrade: undefined, avgProfitPct: undefined, avgLossPct: undefined, 
+          avgProfitLossPct: undefined, profitFactor: undefined, totalProfitLoss: undefined};
+	var totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph)
+	// Query constructor to update the backtest properties.
+	pool.query(`
+    DELETE FROM backtests WHERE backtests.strategyId=? AND datetimeFinished is null;
+		INSERT INTO backtests 
+      (backtestDate, strategyId, datetimeStarted, active, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate)
+    VALUES
+      (?, ?, CONVERT_TZ(NOW(),'SYSTEM','+1:00'), 1, ?, ?, ?, ?, ?, ?);
+    SELECT LAST_INSERT_ID() AS backtestId;`, 
+		[strategyId, backtestDate, strategyId, totalBalance, availableBalance, totalProfitLoss, 
+			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return thepaused state within an object.
-        data = row[0];
-				res.send(data);
+				// Valid and successful request, return the backtestId in the response body.
+        res.send(row[2][0]);
+        // Send the new date as an event to the socket connection.
+        formattedDate = moment(backtestDate).format('DD/MM/YYYY')
+        totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
+        payload = { backtestId: row[2][0].backtestId, backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
+        io.emit("backtestUpdated", payload);
+        io.emit("tradesUpdated");
 			}
 	});
 })
 
-// Listen for PATCH requests to /backtest_properties/is_paused to set the current pause state of the backtest.
-app.patch('/backtest_properties/is_paused', (req, res) => {
-	// Query constructor to get the current the backtest date.
-  const { isPaused } = req.body;
+// Listen for PATCH requests to /backtests/date to set a new date value in the backtest.
+app.patch('/backtests/:backtestId/date', (req, res) => {
+  const backtestId = parseInt(req.params.backtestId);
 
-	 // Query constructor to update the backtest paused state.
-   pool.query(`
-   UPDATE backtestProperties
-     SET
-       isPaused = ?`,
-   [isPaused], (err, row) => {
-     if(err) {
-       console.warn(new Date(), err);
-       // If the MySQL query returned an error, pass the error message onto the client.
-       res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-     } else {
-       // Valid and successful request.
-       res.send(row);
-       // Send the new paused state as an event to the socket connection.
-       payload = { isPaused: isPaused }
-       io.emit("backtestPropertiesUpdated", payload);
-       io.emit("playpause", payload);
-     }
- });
-})
+  // Extract data from request body.
+  const { backtest_date: backtestDate } = req.body;
 
-// Listen for PATCH requests to /backtest_properties/is_paused to set the current pause state of the backtest.
-app.patch('/backtest_properties/available', (req, res) => {
-	// Query constructor to get the current the backtest date.
-  const backtestOnline  = parseInt(req.body.backtestOnline);
-
-  if(backtestOnline === 0) {
-    backtestSocket = undefined;
-  }
-
-  // Query constructor to update the backtest paused state.
+  // Query constructor to update the backtest date.
   pool.query(`
-  UPDATE backtestProperties
-    SET
-      backtestOnline = ?`,
-  [backtestOnline], (err, row) => {
-    if(err) {
-      console.warn(new Date(), err);
-      // If the MySQL query returned an error, pass the error message onto the client.
-      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-    } else {
-      // Valid and successful request.
-      res.send(row);
-      // Send the new backtest availability state as an event to the socket connection.
-      payload = { backtestOnline: backtestOnline }
-      io.emit("backtestPropertiesUpdated", payload);
-      console.log(`Backtest is ${backtestOnline === 1 ? "online" : "offline"}.`)
-    }
- });
+    UPDATE backtests
+      SET
+        backtestDate = ?
+      WHERE backtestId = ?`,
+    [backtestDate, backtestId], (err, row) => {
+      if(err) {
+        console.warn(new Date(), err);
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+      } else {
+        // Valid and successful request.
+        res.send(row);
+        // Send the new date as an event to the socket connection.
+        formattedDate = moment(backtestDate).format('DD/MM/YYYY')
+        payload = { backtestDate: formattedDate }
+        io.emit("backtestUpdated", payload);
+      }
+  });
 })
 
-// Listen for PATCH requests to /backtest_properties/date to set a new date value in the backtest.
-app.put('/backtest_properties', (req, res) => {
+// Listen for PATCH requests to /backtests/date to set a new date value in the backtest.
+app.put('/backtests/:backtestId', (req, res) => {
+  const backtestId = parseInt(req.params.backtestId);
+
   // Extract data from request body.
   const { total_balance: totalBalance, available_balance: availableBalance, total_profit_loss: totalProfitLoss, total_profit_loss_pct: totalProfitLossPct } = req.body;
   
@@ -258,16 +193,17 @@ app.put('/backtest_properties', (req, res) => {
   
   // Query constructor to update the backtest properties.
   pool.query(`
-    UPDATE backtestProperties
+    UPDATE backtests
       SET
         totalBalance = ?,
         availableBalance = ?,
         totalProfitLoss = ?,
         totalProfitLossPct = ?,
         totalProfitLossGraph = ?,
-        successRate = IFNULL((SELECT (SUM(profitLoss >= 0)/count(*))*100 FROM closedTrades), 0);
+        successRate = IFNULL((SELECT (SUM(profitLoss >= 0)/count(*))*100 FROM closedTrades), 0)
+      WHERE backtestId = ?;
         SELECT (SUM(profitLoss >= 0)/count(*))*100 AS 'successRate' FROM closedTrades;`,
-    [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph], (err, row) => {
+    [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, backtestId], (err, row) => {
       if(err) {
         console.warn(new Date(), err);
         // If the MySQL query returned an error, pass the error message onto the client.
@@ -278,13 +214,37 @@ app.put('/backtest_properties', (req, res) => {
         const successRate = row[1][0].successRate;
         // Send the new date as an event to the socket connection.
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
-        io.emit("backtestPropertiesUpdated", payload);
+        payload = { backtestId, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
+        io.emit("backtestUpdated", payload);
       }
   });
 })
 
-// Listen for GET requests to /backtest_properties to get the current backtest properties.
+app.put('/backtests/:backtestId/finalise', (req, res) => {
+  const backtestId = parseInt(req.params.backtestId);
+
+  var  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
+  
+  // Query constructor to update the backtest properties.
+  pool.query(`
+    UPDATE backtests
+      SET
+        datetimeFinished = CONVERT_TZ(NOW(),'SYSTEM','+1:00'),
+        active = 0
+      WHERE backtestId = ?;`,
+    [backtestId], (err, row) => {
+      if(err) {
+        console.warn(new Date(), err);
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+      } else {
+        // Valid and successful request.
+        res.send(row);
+      }
+  });
+})
+
+// Listen for GET requests to /backtests to get the current backtest properties.
 app.get('/backtest_settings', (req, res) => {
 	// Query constructor to get the current the backtest date.
 	pool.query(`SELECT backtestSettings.*, strategies.strategyName FROM backtestSettings
@@ -332,6 +292,77 @@ app.put('/backtest_settings', (req, res) => {
       }
   });
 })
+// Listen for GET requests to /backtests/is_paused to get the current pause state of the backtest.
+app.get('/backtest_settings/is_paused', (req, res) => {
+	// Query constructor to get the current pause state of the backtest.
+	pool.query(`SELECT isPaused FROM backtestSettings;`, (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request, return thepaused state within an object.
+        data = row[0];
+				res.send(data);
+			}
+	});
+})
+
+// Listen for PATCH requests to /backtests/is_paused to set the current pause state of the backtest.
+app.patch('/backtest_settings/is_paused', (req, res) => {
+	// Query constructor to get the current the backtest date.
+  const { isPaused } = req.body;
+
+	 // Query constructor to update the backtest paused state.
+   pool.query(`
+   UPDATE backtestSettings
+     SET
+       isPaused = ?`,
+   [isPaused], (err, row) => {
+     if(err) {
+       console.warn(new Date(), err);
+       // If the MySQL query returned an error, pass the error message onto the client.
+       res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+     } else {
+       // Valid and successful request.
+       res.send(row);
+       // Send the new paused state as an event to the socket connection.
+       payload = { isPaused: isPaused }
+       io.emit("backtestUpdated", payload);
+       io.emit("playpause", payload);
+     }
+ });
+})
+
+// Listen for PATCH requests to /backtests/is_paused to set the current pause state of the backtest.
+app.patch('/backtest_settings/available', (req, res) => {
+	// Query constructor to get the current the backtest date.
+  const backtestOnline  = parseInt(req.body.backtestOnline);
+
+  if(backtestOnline === 0) {
+    backtestSocket = undefined;
+  }
+
+  // Query constructor to update the backtest paused state.
+  pool.query(`
+  UPDATE backtestSettings
+    SET
+      backtestOnline = ?`,
+  [backtestOnline], (err, row) => {
+    if(err) {
+      console.warn(new Date(), err);
+      // If the MySQL query returned an error, pass the error message onto the client.
+      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+    } else {
+      // Valid and successful request.
+      res.send(row);
+      // Send the new backtest availability state as an event to the socket connection.
+      payload = { backtestOnline: backtestOnline }
+      io.emit("backtestUpdated", payload);
+      console.log(`Backtest is ${backtestOnline === 1 ? "online" : "offline"}.`)
+    }
+ });
+})
 
 // Listen for PUT requests to /backtest_settings to the backtest settings.
 app.put('/backtest_settings/strategy', (req, res) => {
@@ -356,7 +387,9 @@ app.put('/backtest_settings/strategy', (req, res) => {
 })
 
 // Listen for POST requests to /trades to add a new trade to the open_trades table.
-app.post('/trades', (req, res) => {
+app.post('/trades/:backtestId', (req, res) => {
+
+  const backtestId = parseInt(req.params.backtestId);
 
   const { ticker, buy_date: buyDate, share_qty: shareQty, investment_total: investmentTotal, buy_price: buyPrice, 
     current_price: currentPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct } = req.body;
@@ -366,11 +399,11 @@ app.post('/trades', (req, res) => {
   // Query constructor to send a new trade to openTrades.
 	pool.query(`
     INSERT INTO openTrades
-      (ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct)
+      (backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct)
     VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS trade_id;`, 
-  [ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct], (err, row) => {
+  [backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct], (err, row) => {
     if(err) {
       console.warn(new Date(), err);
       // If the MySQL query returned an error, pass the error message onto the client.
@@ -382,101 +415,6 @@ app.post('/trades', (req, res) => {
       io.emit("tradesUpdated");
     }
   });
-})
-
-// Listen for GET requests to /trades to get the current trades in the backtest.
-app.get('/trades', (req, res) => {
-	// Query constructor to get all current open and closed trades..
-	pool.query(`
-    SELECT * FROM openTrades; SELECT * FROM closedTrades;
-    SELECT * FROM (
-      SELECT * FROM closedTrades ORDER BY \`index\` DESC LIMIT 10
-    ) sub;`, (err, row) => {
-			if(err) {
-				console.warn(new Date(), err);
-				// If the MySQL query returned an error, pass the error message onto the client.
-				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-			} else {
-				// Valid and successful request, return the formatted date within an object.
-        data = [row[0], row[2]]
-        // Separate and parse the two results for the UI to easily use.
-        for(i=0; i<data[0].length; i++) {
-          data[0][i].figure = JSON.parse(JSON.parse(data[0][i].figure))
-        }
-        for(i=0; i<data[1].length; i++) {
-          data[1][i].figure = JSON.parse(JSON.parse(data[1][i].figure))
-        }
-				res.send(data);
-			}
-	});
-})
-
-// Listen for PUT requests to /trades to update all open trades and send the closed ones to the closed trades table.
-app.put('/trades', (req, res) => {
-
-  const openTrades = req.body.open_trades,
-        closedTrades = req.body.closed_trades;
-  var openTradeValues = [],
-      closedTradeValues = [],
-      openTradeMySQLString = "",
-      closedTradeMySQLString = "";
-
-  // Generate MySQL query string and inputs, to allow the backtest to update all required trades in the openTrades table.
-  openTrades.forEach(trade => {
-    const {trade_id: tradeId, current_price: currentPrice, profit_loss_pct: profitLossPct} = trade;
-    const figure = JSON.stringify(trade.figure);
-    values = [currentPrice, figure, profitLossPct, tradeId];
-    openTradeValues.push(...values);
-    openTradeMySQLString += "UPDATE openTrades SET currentPrice = ?, figure = ?, profitLossPct= ? WHERE tradeId = ?;"
-  });
-
-  // Generate MySQL query string and inputs, to allow the backtest to add all required trades in the closedTrades table.
-  closedTrades.forEach(trade => {
-    const {trade_id: tradeId, ticker, buy_date: buyDate, sell_date: sellDate, share_qty: shareQty, investment_total: investmentTotal, profit_loss: profitLoss,
-      buy_price: buyPrice, sell_price: sellPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct} = trade;
-    const figure = JSON.stringify(trade.figure);
-    values = [tradeId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, sellPrice, takeProfit, stopLoss, figure, profitLossPct, tradeId];
-    closedTradeValues.push(...values);
-    closedTradeMySQLString += "INSERT INTO closedTrades (tradeId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, \
-      sellPrice, takeProfit, stopLoss, figure, profitLossPct)\ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);\
-      DELETE FROM openTrades WHERE tradeId = ?;"
-  });
-  
-  result = []
-
-  if(openTradeValues.length > 0) {
-    // Query constructor to update the open trades.
-    pool.query(openTradeMySQLString,
-      openTradeValues, (err, row) => {
-        if(err) {
-          console.warn(new Date(), err);
-          // If the MySQL query returned an error, pass the error message onto the client.
-          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-        } else {
-          // Valid and successful request.
-          result.push(row);
-        }
-    });
-  }
-  if(closedTradeValues.length > 0) {
-    // Query constructor to move trades from the openTrades table to closedTrades.
-    pool.query(closedTradeMySQLString,
-      closedTradeValues, (err, row) => {
-        if(err) {
-          console.warn(new Date(), err);
-          // If the MySQL query returned an error, pass the error message onto the client.
-          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-        } else {
-          // Valid and successful request.
-          result.push(row);
-        }
-    });
-  }
-  res.send(result);
-  io.emit("tradesUpdated");
-  if(closedTradeValues.length > 0) {
-    io.emit("updateStats");
-  }
 })
 
 // Listen for GET requests to /trades/stats to get the current trade statistics of the backtest from the date specified.
@@ -532,6 +470,97 @@ app.get('/trades/stats', (req, res) => {
 	});
 })
 
+// Listen for GET requests to /trades to get the current trades for the specified backtest.
+app.get('/trades/:backtestId', (req, res) => {
+
+  const backtestId = parseInt(req.params.backtestId);
+
+	// Query constructor to get all current open and closed trades..
+	pool.query(`
+    SELECT * FROM openTrades WHERE backtestId = ?;
+    SELECT * FROM (
+      SELECT * FROM closedTrades WHERE backtestId = ? ORDER BY sellDate DESC LIMIT 10
+    ) sub;`, [backtestId, backtestId], (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request, return the formatted date within an object.
+        data = [row[0], row[1]]
+        // Separate and parse the two results for the UI to easily use.
+        for(i=0; i<data[0].length; i++) {
+          data[0][i].figure = JSON.parse(JSON.parse(data[0][i].figure))
+        }
+        for(i=0; i<data[1].length; i++) {
+          data[1][i].figure = JSON.parse(JSON.parse(data[1][i].figure))
+        }
+				res.send(data);
+			}
+	});
+})
+
+// Listen for PUT requests to /trades to update all open trades and send the closed ones to the closed trades table.
+app.put('/trades/:backtestId', (req, res) => {
+
+  const backtestId = parseInt(req.params.backtestId);
+  
+  const openTrades = req.body.open_trades,
+        closedTrades = req.body.closed_trades;
+  
+  
+  let result = []
+
+  // Generate MySQL query string and inputs, to allow the backtest to update all required trades in the openTrades table.
+  openTrades.forEach(trade => {
+    const {trade_id: tradeId, current_price: currentPrice, profit_loss_pct: profitLossPct} = trade;
+    const figure = JSON.stringify(trade.figure);
+    // Query constructor to update the open trades.
+    pool.query("UPDATE openTrades SET currentPrice = ?, figure = ?, profitLossPct= ? WHERE tradeId = ?;",
+    [currentPrice, figure, profitLossPct, tradeId], (err, row) => {
+        if(err) {
+          console.warn(new Date(), err);
+          // If the MySQL query returned an error, pass the error message onto the client.
+          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+        } else {
+          // Valid and successful request.
+          result.push(row);
+        }
+    });
+  });
+
+  // Generate MySQL query string and inputs, to allow the backtest to add all required trades in the closedTrades table.
+  closedTrades.forEach(trade => {
+    const {trade_id: tradeId, ticker, buy_date: buyDate, sell_date: sellDate, share_qty: shareQty, investment_total: investmentTotal, profit_loss: profitLoss,
+      buy_price: buyPrice, sell_price: sellPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct} = trade;
+    const figure = JSON.stringify(trade.figure);
+    // Query constructor to update the open trades.
+    pool.query(`
+      LOCK TABLES
+        openTrades write,
+        closedTrades write;
+      INSERT INTO closedTrades (tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, 
+        sellPrice, takeProfit, stopLoss, figure, profitLossPct)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      DELETE FROM openTrades WHERE tradeId = ?;
+      UNLOCK TABLES;`, 
+      [tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, sellPrice, takeProfit, stopLoss, figure, profitLossPct, tradeId], (err, row) => {
+      if(err) {
+        console.warn(new Date(), err);
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+      } else {
+        // Valid and successful request.
+        result.push(row);
+      }
+    });
+  });
+
+  res.send(result);
+  io.emit("tradesUpdated");
+  io.emit("updateStats");
+})
+
 // Listen for GET requests to /strategies/modules to get the current available modules from the backend, OR from the databse if backend is offline.
 app.get('/strategies/modules', (req, res) => {
 
@@ -579,25 +608,72 @@ app.get('/strategies/modules', (req, res) => {
 
 // Listen for GET requests to /strategies to get the current saved strategies in the databse.
 app.get('/strategies', (req, res) => {
-	// Query constructor to get the current saved strategies.
-	pool.query(`SELECT * FROM strategies;`, (err, row) => {
-			if(err) {
-				console.warn(new Date(), err);
-				// If the MySQL query returned an error, pass the error message onto the client.
-				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-			} else {
-				// Valid and successful request, format data and return.
+  function getStrategies() {
+    return new Promise(function(resolve, reject) {
+      // Query constructor to get the current saved strategies.
+	    pool.query(`SELECT * FROM strategies;`, (err, row) => {
+        if(err) {
+          console.warn(new Date(), err);
+          // If the MySQL query returned an error, pass the error message onto the client.
+          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+        }
         data = row
         for(i=0; i<row.length; i++){
           data[i].technicalAnalysis = JSON.parse(data[i].technicalAnalysis);
-          data[i].lastRun = "12m ago", 
-          data[i].active = false, 
-          data[i].avgSuccess = Math.round((i+1)*2*13.3),
-          data[i].avgReturns = Math.round((i+1)*2*9.3)
         }
-				res.send(data);
-			}
-	});
+        resolve(data);
+      });
+    });
+  }
+
+  function getBacktests(strategyId) {
+    return new Promise(function(resolve, reject) {
+      // Query constructor to get the current saved strategies.
+	    pool.query(`SELECT * FROM backtests WHERE strategyId = ? AND (datetimeFinished is not null OR active=1) ORDER BY datetimeStarted DESC LIMIT 10;`, [strategyId], (err, row) => {
+        if(err) {
+          console.warn(new Date(), err);
+          // If the MySQL query returned an error, pass the error message onto the client.
+          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+        }
+        data = row
+        resolve(data);
+      });
+    });
+  }
+
+  getStrategies()
+  .then(async function(strategies) {
+    for (let i = 0; i < strategies.length; i++) {
+      const backtests = await getBacktests(strategies[i].strategyId);
+      let sumSuccessRate = 0;
+      let sumReturns = 0;
+      let numActive = 0;
+
+      backtests.forEach((backtest) => {
+        backtest.totalProfitLossGraph = JSON.parse(JSON.parse(backtest.totalProfitLossGraph))
+        if(backtest.active === 1) {
+          numActive += 1;
+        } else {
+          sumSuccessRate += backtest.successRate;
+          sumReturns += backtest.totalProfitLossPct;
+        }
+      });
+      let avgSuccessRate = "N/A";
+      let avgReturns = "N/A";
+      if(backtests.length > 0) {
+        avgSuccessRate = Math.round((sumSuccessRate/(backtests.length - numActive))*10)/10;
+        avgReturns = sumReturns/(backtests.length - numActive);
+        strategies[i].active = (backtests[0].active === 1);
+      }
+      strategies[i].backtests = backtests;
+      strategies[i].avgSuccess = avgSuccessRate;
+      strategies[i].avgReturns = avgReturns;
+    }
+
+    res.send(strategies);
+  })
+  .catch((err) => setImmediate(() => { throw err; })); // Throw async to escape the promise chain
+	
 })
 
 // Listen for POST requests to /strategies to add a new strategy to the database.
@@ -681,7 +757,7 @@ app.put('/strategies/:strategyId', (req, res) => {
 // Listen for DELETE requests to /strategies and delete the specified entry in the table.
 app.delete('/strategies/:strategyId', (req, res) => {
   // Extract data from route parameter.
-  const strategyId  = req.params.strategyId;
+  const strategyId  = parseInt(req.params.strategyId);
   
   // Query constructor to remove row from strategies.
   pool.query(`DELETE FROM strategies
@@ -702,7 +778,7 @@ app.delete('/strategies/:strategyId', (req, res) => {
         } else {
           // Valid and successful request.
           // Emit message for backtest to stop backtest if it is running the strategy just deleted.
-          backtestSocket.emit("getAnalysisModules", strategyId);
+          backtestSocket.emit("stopBacktest", strategyId, "Strategy in use was deleted");
           res.send(row);
         }
       }
