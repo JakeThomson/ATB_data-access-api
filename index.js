@@ -88,10 +88,34 @@ io.on('connection', (socket) => {
   })
 });
 
+// Listen for GET requests to /backtests to get the current backtest properties.
+app.get('/backtests', (req, res) => {
+	// Query constructor to get the current the backtest date.
+	pool.query(`
+        SELECT
+            backtests.*, backtestSettings.startDate
+        FROM
+            backtests
+        INNER JOIN
+            backtestSettings
+        ORDER BY backtestId DESC LIMIT 1;`, (err, row) => {
+			if(err) {
+				console.warn(new Date(), err);
+				// If the MySQL query returned an error, pass the error message onto the client.
+				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+			} else {
+				// Valid and successful request, return the properties within an object wit  the date formatted.
+        data = row[0];
+        data.backtestDate = moment(data.backtestDate).format('DD/MM/YYYY')
+				res.send(data);
+			}
+	});
+})
+
 // Listen for PUT requests to /backtests/initialise and re-initialise the backtest properties.
-app.post('/backtests/initialise', (req, res) => {
+app.post('/backtests', (req, res) => {
   // Extract data from request body.
-  const { start_date: startDate, start_balance: startBalance } = req.body;
+  const { start_date: startDate, start_balance: startBalance, strategy_id: strategyId } = req.body;
 	
 	const backtestDate = startDate,
         totalBalance = startBalance,
@@ -105,11 +129,11 @@ app.post('/backtests/initialise', (req, res) => {
 	// Query constructor to update the backtest properties.
 	pool.query(`
 		INSERT INTO backtests 
-      (backtestDate, datetimeStarted, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate)
+      (backtestDate, strategyId, datetimeStarted, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate)
     VALUES
-      (?, NOW(), ?, ?, ?, ?, ?, ?);
+      (?, ?, NOW(), ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS backtestId;`, 
-		[backtestDate, totalBalance, availableBalance, totalProfitLoss, 
+		[backtestDate, strategyId, totalBalance, availableBalance, totalProfitLoss, 
 			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
@@ -157,30 +181,6 @@ app.patch('/backtests/:backtestId/date', (req, res) => {
   });
 })
 
-// Listen for GET requests to /backtests to get the current backtest properties.
-app.get('/backtests', (req, res) => {
-	// Query constructor to get the current the backtest date.
-	pool.query(`
-        SELECT
-            backtests.*, backtestSettings.startDate
-        FROM
-            backtests
-        INNER JOIN
-            backtestSettings
-        ORDER BY backtestId DESC LIMIT 1;`, (err, row) => {
-			if(err) {
-				console.warn(new Date(), err);
-				// If the MySQL query returned an error, pass the error message onto the client.
-				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-			} else {
-				// Valid and successful request, return the properties within an object wit  the date formatted.
-        data = row[0];
-        data.backtestDate = moment(data.backtestDate).format('DD/MM/YYYY')
-				res.send(data);
-			}
-	});
-})
-
 // Listen for PATCH requests to /backtests/date to set a new date value in the backtest.
 app.put('/backtests/:backtestId', (req, res) => {
   const backtestId = parseInt(req.params.backtestId);
@@ -215,6 +215,29 @@ app.put('/backtests/:backtestId', (req, res) => {
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
         payload = { totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
         io.emit("backtestUpdated", payload);
+      }
+  });
+})
+
+app.put('/backtests/:backtestId/finalise', (req, res) => {
+  const backtestId = parseInt(req.params.backtestId);
+
+  var  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
+  
+  // Query constructor to update the backtest properties.
+  pool.query(`
+    UPDATE backtests
+      SET
+        datetimeFinished = NOW()
+      WHERE backtestId = ?;`,
+    [backtestId], (err, row) => {
+      if(err) {
+        console.warn(new Date(), err);
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+      } else {
+        // Valid and successful request.
+        res.send(row);
       }
   });
 })
@@ -482,18 +505,26 @@ app.put('/trades/:backtestId', (req, res) => {
   
   const openTrades = req.body.open_trades,
         closedTrades = req.body.closed_trades;
-  var openTradeValues = [],
-      closedTradeValues = [],
-      openTradeMySQLString = "",
-      closedTradeMySQLString = "";
+  
+  
+  let result = []
 
   // Generate MySQL query string and inputs, to allow the backtest to update all required trades in the openTrades table.
   openTrades.forEach(trade => {
     const {trade_id: tradeId, current_price: currentPrice, profit_loss_pct: profitLossPct} = trade;
     const figure = JSON.stringify(trade.figure);
-    values = [currentPrice, figure, profitLossPct, tradeId];
-    openTradeValues.push(...values);
-    openTradeMySQLString += "UPDATE openTrades SET currentPrice = ?, figure = ?, profitLossPct= ? WHERE tradeId = ?;"
+    // Query constructor to update the open trades.
+    pool.query("UPDATE openTrades SET currentPrice = ?, figure = ?, profitLossPct= ? WHERE tradeId = ?;",
+    [currentPrice, figure, profitLossPct, tradeId], (err, row) => {
+        if(err) {
+          console.warn(new Date(), err);
+          // If the MySQL query returned an error, pass the error message onto the client.
+          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+        } else {
+          // Valid and successful request.
+          result.push(row);
+        }
+    });
   });
 
   // Generate MySQL query string and inputs, to allow the backtest to add all required trades in the closedTrades table.
@@ -501,49 +532,31 @@ app.put('/trades/:backtestId', (req, res) => {
     const {trade_id: tradeId, ticker, buy_date: buyDate, sell_date: sellDate, share_qty: shareQty, investment_total: investmentTotal, profit_loss: profitLoss,
       buy_price: buyPrice, sell_price: sellPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct} = trade;
     const figure = JSON.stringify(trade.figure);
-    values = [tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, sellPrice, takeProfit, stopLoss, figure, profitLossPct, tradeId];
-    closedTradeValues.push(...values);
-    closedTradeMySQLString += "INSERT INTO closedTrades (tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, \
-      sellPrice, takeProfit, stopLoss, figure, profitLossPct)\
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);\
-      DELETE FROM openTrades WHERE tradeId = ?;"
-  });
-  
-  result = []
-
-  if(openTradeValues.length > 0) {
     // Query constructor to update the open trades.
-    pool.query(openTradeMySQLString,
-      openTradeValues, (err, row) => {
-        if(err) {
-          console.warn(new Date(), err);
-          // If the MySQL query returned an error, pass the error message onto the client.
-          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-        } else {
-          // Valid and successful request.
-          result.push(row);
-        }
+    pool.query(`
+      LOCK TABLES
+        openTrades write,
+        closedTrades write;
+      INSERT INTO closedTrades (tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, 
+        sellPrice, takeProfit, stopLoss, figure, profitLossPct)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      DELETE FROM openTrades WHERE tradeId = ?;
+      UNLOCK TABLES;`, 
+      [tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, sellPrice, takeProfit, stopLoss, figure, profitLossPct, tradeId], (err, row) => {
+      if(err) {
+        console.warn(new Date(), err);
+        // If the MySQL query returned an error, pass the error message onto the client.
+        res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+      } else {
+        // Valid and successful request.
+        result.push(row);
+      }
     });
-  }
-  if(closedTradeValues.length > 0) {
-    // Query constructor to move trades from the openTrades table to closedTrades.
-    pool.query(closedTradeMySQLString,
-      closedTradeValues, (err, row) => {
-        if(err) {
-          console.warn(new Date(), err);
-          // If the MySQL query returned an error, pass the error message onto the client.
-          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-        } else {
-          // Valid and successful request.
-          result.push(row);
-        }
-    });
-  }
+  });
+
   res.send(result);
   io.emit("tradesUpdated");
-  if(closedTradeValues.length > 0) {
-    io.emit("updateStats");
-  }
+  io.emit("updateStats");
 })
 
 // Listen for GET requests to /strategies/modules to get the current available modules from the backend, OR from the databse if backend is offline.
