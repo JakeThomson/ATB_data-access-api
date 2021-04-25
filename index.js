@@ -131,7 +131,7 @@ app.post('/backtests', (req, res) => {
 		INSERT INTO backtests 
       (backtestDate, strategyId, datetimeStarted, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate)
     VALUES
-      (?, ?, NOW(), ?, ?, ?, ?, ?, ?);
+      (?, ?, CONVERT_TZ(NOW(),'SYSTEM','+1:00'), ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS backtestId;`, 
 		[backtestDate, strategyId, totalBalance, availableBalance, totalProfitLoss, 
 			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
@@ -228,7 +228,7 @@ app.put('/backtests/:backtestId/finalise', (req, res) => {
   pool.query(`
     UPDATE backtests
       SET
-        datetimeFinished = NOW()
+        datetimeFinished = CONVERT_TZ(NOW(),'SYSTEM','+1:00')
       WHERE backtestId = ?;`,
     [backtestId], (err, row) => {
       if(err) {
@@ -606,25 +606,68 @@ app.get('/strategies/modules', (req, res) => {
 
 // Listen for GET requests to /strategies to get the current saved strategies in the databse.
 app.get('/strategies', (req, res) => {
-	// Query constructor to get the current saved strategies.
-	pool.query(`SELECT * FROM strategies;`, (err, row) => {
-			if(err) {
-				console.warn(new Date(), err);
-				// If the MySQL query returned an error, pass the error message onto the client.
-				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
-			} else {
-				// Valid and successful request, format data and return.
+  function getStrategies() {
+    return new Promise(function(resolve, reject) {
+      // Query constructor to get the current saved strategies.
+	    pool.query(`SELECT * FROM strategies;`, (err, row) => {
+        if(err) {
+          console.warn(new Date(), err);
+          // If the MySQL query returned an error, pass the error message onto the client.
+          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+        }
         data = row
         for(i=0; i<row.length; i++){
           data[i].technicalAnalysis = JSON.parse(data[i].technicalAnalysis);
           data[i].lastRun = "12m ago", 
-          data[i].active = false, 
-          data[i].avgSuccess = Math.round((i+1)*2*13.3),
-          data[i].avgReturns = Math.round((i+1)*2*9.3)
+          data[i].active = false
         }
-				res.send(data);
-			}
-	});
+        resolve(data);
+      });
+    });
+  }
+
+  function getBacktests(strategyId) {
+    return new Promise(function(resolve, reject) {
+      // Query constructor to get the current saved strategies.
+	    pool.query(`SELECT * FROM backtests WHERE strategyId = ? AND datetimeFinished IS NOT NULL ORDER BY datetimeFinished DESC LIMIT 10;`, [strategyId], (err, row) => {
+        if(err) {
+          console.warn(new Date(), err);
+          // If the MySQL query returned an error, pass the error message onto the client.
+          res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+        }
+        data = row
+        resolve(data);
+      });
+    });
+  }
+
+  getStrategies()
+  .then(async function(strategies) {
+    for (let i = 0; i < strategies.length; i++) {
+      const backtests = await getBacktests(strategies[i].strategyId);
+      let sumSuccessRate = 0;
+      let sumReturns = 0;
+
+      backtests.forEach((backtest) => {
+        backtest.totalProfitLossGraph = JSON.parse(JSON.parse(backtest.totalProfitLossGraph))
+        sumSuccessRate += backtest.successRate;
+        sumReturns += backtest.totalProfitLossPct;
+      });
+      let avgSuccessRate = "N/A";
+      let avgReturns = "N/A";
+      if(backtests.length > 0) {
+        avgSuccessRate = Math.round((sumSuccessRate/backtests.length)*10)/10;
+        avgReturns = sumReturns/backtests.length;
+      }
+      strategies[i].backtests = backtests;
+      strategies[i].avgSuccess = avgSuccessRate;
+      strategies[i].avgReturns = avgReturns;
+    }
+
+    res.send(strategies);
+  })
+  .catch((err) => setImmediate(() => { throw err; })); // Throw async to escape the promise chain
+	
 })
 
 // Listen for POST requests to /strategies to add a new strategy to the database.
