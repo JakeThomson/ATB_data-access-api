@@ -364,6 +364,30 @@ app.patch('/backtest_settings/available', (req, res) => {
  });
 })
 
+// Listen for PATCH requests to /backtests/is_paused to set the current pause state of the backtest.
+app.get('/backtest_settings/available', (req, res) => {
+	// Query constructor to get the current the backtest date.
+  const backtestOnline  = parseInt(req.body.backtestOnline);
+
+  if(backtestOnline === 0) {
+    backtestSocket = undefined;
+  }
+
+  // Query constructor to update the backtest paused state.
+  pool.query(`
+  SELECT backtestOnline FROM backtestSettings;`,
+  [backtestOnline], (err, row) => {
+    if(err) {
+      console.warn(new Date(), err);
+      // If the MySQL query returned an error, pass the error message onto the client.
+      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+    } else {
+      // Valid and successful request.
+      res.send(row[0]);
+    }
+ });
+})
+
 // Listen for PUT requests to /backtest_settings to the backtest settings.
 app.put('/backtest_settings/strategy', (req, res) => {
   // Extract data from request body.
@@ -395,16 +419,16 @@ app.post('/trades/:backtestId', (req, res) => {
     current_price: currentPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct } = req.body;
   
   const figure = JSON.stringify(req.body.figure);
-  const priceGaugeFigure = JSON.stringify(req.body.priceGaugeFigure);
+  const simpleFigure = JSON.stringify(req.body.simpleFigure);
 
   // Query constructor to send a new trade to openTrades.
 	pool.query(`
     INSERT INTO openTrades
-      (backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, priceGaugeFigure, profitLossPct)
+      (backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, simpleFigure, profitLossPct)
     VALUES
       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS trade_id;`, 
-  [backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, priceGaugeFigure, profitLossPct], (err, row) => {
+  [backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, simpleFigure, profitLossPct], (err, row) => {
     if(err) {
       console.warn(new Date(), err);
       // If the MySQL query returned an error, pass the error message onto the client.
@@ -464,10 +488,12 @@ app.get('/trades/:backtestId/stats', (req, res) => {
         // Format results into a usable object to be sent to the client.
         const highestProfitTrade = row[0][0];
         if(highestProfitTrade !== undefined){
+          highestProfitTrade.simpleFigure = JSON.parse(JSON.parse(highestProfitTrade.simpleFigure));
           highestProfitTrade.figure = JSON.parse(JSON.parse(highestProfitTrade.figure));
         }
         const highestLossTrade = row[1][0];
         if(highestLossTrade !== undefined){
+          highestLossTrade.simpleFigure = JSON.parse(JSON.parse(highestLossTrade.simpleFigure));
           highestLossTrade.figure = JSON.parse(JSON.parse(highestLossTrade.figure));
         }
 				const data = {highestProfitTrade, highestLossTrade, avgProfitPct: row[2][0].avgProfitPct, avgLossPct: row[3][0].avgLossPct, 
@@ -497,10 +523,11 @@ app.get('/trades/:backtestId', (req, res) => {
         data = [row[0], row[1]]
         // Separate and parse the two results for the UI to easily use.
         for(i=0; i<data[0].length; i++) {
-          data[0][i].priceGaugeFigure = JSON.parse(JSON.parse(data[0][i].priceGaugeFigure))
+          data[0][i].simpleFigure = JSON.parse(JSON.parse(data[0][i].simpleFigure))
           data[0][i].figure = JSON.parse(JSON.parse(data[0][i].figure))
         }
         for(i=0; i<data[1].length; i++) {
+          data[1][i].simpleFigure = JSON.parse(JSON.parse(data[1][i].simpleFigure))
           data[1][i].figure = JSON.parse(JSON.parse(data[1][i].figure))
         }
 				res.send(data);
@@ -522,11 +549,11 @@ app.put('/trades/:backtestId', (req, res) => {
   // Generate MySQL query string and inputs, to allow the backtest to update all required trades in the openTrades table.
   openTrades.forEach(trade => {
     const {trade_id: tradeId, current_price: currentPrice, profit_loss_pct: profitLossPct} = trade;
-    const priceGaugeFigure = JSON.stringify(trade.priceGaugeFigure);
+    const simpleFigure = JSON.stringify(trade.simpleFigure);
     const figure = JSON.stringify(trade.figure);
     // Query constructor to update the open trades.
-    pool.query("UPDATE openTrades SET currentPrice = ?, priceGaugeFigure = ?, figure = ?, profitLossPct = ? WHERE tradeId = ?;",
-    [currentPrice, priceGaugeFigure, figure, profitLossPct, tradeId], (err, row) => {
+    pool.query("UPDATE openTrades SET currentPrice = ?, simpleFigure = ?, figure = ?, profitLossPct = ? WHERE tradeId = ?;",
+    [currentPrice, simpleFigure, figure, profitLossPct, tradeId], (err, row) => {
         if(err) {
           console.warn(new Date(), err);
           // If the MySQL query returned an error, pass the error message onto the client.
@@ -543,17 +570,18 @@ app.put('/trades/:backtestId', (req, res) => {
     const {trade_id: tradeId, ticker, buy_date: buyDate, sell_date: sellDate, share_qty: shareQty, investment_total: investmentTotal, profit_loss: profitLoss,
       buy_price: buyPrice, sell_price: sellPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct} = trade;
     const figure = JSON.stringify(trade.figure);
+    const simpleFigure = JSON.stringify(trade.simpleFigure);
     // Query constructor to update the open trades.
     pool.query(`
       LOCK TABLES
         openTrades write,
         closedTrades write;
       INSERT INTO closedTrades (tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, 
-        sellPrice, takeProfit, stopLoss, figure, profitLossPct)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        sellPrice, takeProfit, stopLoss, figure, simpleFigure, profitLossPct)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
       DELETE FROM openTrades WHERE tradeId = ?;
       UNLOCK TABLES;`, 
-      [tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, sellPrice, takeProfit, stopLoss, figure, profitLossPct, tradeId], (err, row) => {
+      [tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, sellPrice, takeProfit, stopLoss, figure, simpleFigure, profitLossPct, tradeId], (err, row) => {
       if(err) {
         console.warn(new Date(), err);
         // If the MySQL query returned an error, pass the error message onto the client.
