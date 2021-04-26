@@ -400,11 +400,11 @@ app.post('/trades/:backtestId', (req, res) => {
   // Query constructor to send a new trade to openTrades.
 	pool.query(`
     INSERT INTO openTrades
-      (backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct)
+      (backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, priceGaugeFigure, profitLossPct)
     VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS trade_id;`, 
-  [backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct], (err, row) => {
+  [backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, priceGaugeFigure, profitLossPct], (err, row) => {
     if(err) {
       console.warn(new Date(), err);
       // If the MySQL query returned an error, pass the error message onto the client.
@@ -497,6 +497,7 @@ app.get('/trades/:backtestId', (req, res) => {
         data = [row[0], row[1]]
         // Separate and parse the two results for the UI to easily use.
         for(i=0; i<data[0].length; i++) {
+          data[0][i].priceGaugeFigure = JSON.parse(JSON.parse(data[0][i].priceGaugeFigure))
           data[0][i].figure = JSON.parse(JSON.parse(data[0][i].figure))
         }
         for(i=0; i<data[1].length; i++) {
@@ -521,10 +522,11 @@ app.put('/trades/:backtestId', (req, res) => {
   // Generate MySQL query string and inputs, to allow the backtest to update all required trades in the openTrades table.
   openTrades.forEach(trade => {
     const {trade_id: tradeId, current_price: currentPrice, profit_loss_pct: profitLossPct} = trade;
+    const priceGaugeFigure = JSON.stringify(trade.priceGaugeFigure);
     const figure = JSON.stringify(trade.figure);
     // Query constructor to update the open trades.
-    pool.query("UPDATE openTrades SET currentPrice = ?, figure = ?, profitLossPct= ? WHERE tradeId = ?;",
-    [currentPrice, figure, profitLossPct, tradeId], (err, row) => {
+    pool.query("UPDATE openTrades SET currentPrice = ?, priceGaugeFigure = ?, figure = ?, profitLossPct = ? WHERE tradeId = ?;",
+    [currentPrice, priceGaugeFigure, figure, profitLossPct, tradeId], (err, row) => {
         if(err) {
           console.warn(new Date(), err);
           // If the MySQL query returned an error, pass the error message onto the client.
