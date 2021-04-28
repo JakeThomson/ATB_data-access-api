@@ -200,10 +200,10 @@ app.put('/backtests/:backtestId', (req, res) => {
         totalProfitLoss = ?,
         totalProfitLossPct = ?,
         totalProfitLossGraph = ?,
-        successRate = IFNULL((SELECT (SUM(profitLoss >= 0)/count(*))*100 FROM closedTrades), 0)
+        successRate = IFNULL((SELECT (SUM(profitLoss >= 0)/count(*))*100 FROM closedTrades WHERE backtestId = ?), 0)
       WHERE backtestId = ?;
-        SELECT (SUM(profitLoss >= 0)/count(*))*100 AS 'successRate' FROM closedTrades;`,
-    [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, backtestId], (err, row) => {
+        SELECT (SUM(profitLoss >= 0)/count(*))*100 AS 'successRate' FROM closedTrades WHERE backtestId = ?;`,
+    [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, backtestId, backtestId, backtestId], (err, row) => {
       if(err) {
         console.warn(new Date(), err);
         // If the MySQL query returned an error, pass the error message onto the client.
