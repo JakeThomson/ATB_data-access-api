@@ -723,7 +723,7 @@ app.post('/strategies', (req, res) => {
   // Convert json object into json string that can be accepted by the database.
   strategyData = JSON.stringify(strategyData)
 
-  // Query constructor to send a new strategu to the database.
+  // Query constructor to send a new strategy to the database.
 	pool.query(`
     INSERT INTO strategies
       (strategyName, technicalAnalysis, lookbackRangeWeeks, maxWeekPeriod)
@@ -742,7 +742,7 @@ app.post('/strategies', (req, res) => {
   });
 })
 
-// Listen for GET requests to /strategies/:strategyId to get information on a specific strategy.
+// Listen for GET requests to /strategies/? to get information on a specific strategy.
 app.get('/strategies/:strategyId', (req, res) => {
   const strategyId = req.params.strategyId;
 
@@ -763,7 +763,7 @@ app.get('/strategies/:strategyId', (req, res) => {
 	});
 })
 
-// Listen for PUT requests to /strategies/:strategyId and update the specified strategy.
+// Listen for PUT requests to /strategies/? and update the specified strategy.
 app.put('/strategies/:strategyId', (req, res) => {
 
   // Extract data from request body.
@@ -792,7 +792,7 @@ app.put('/strategies/:strategyId', (req, res) => {
 	});
 })
 
-// Listen for DELETE requests to /strategies and delete the specified entry in the table.
+// Listen for DELETE requests to /strategies? and delete the specified entry in the table.
 app.delete('/strategies/:strategyId', (req, res) => {
   // Extract data from route parameter.
   const strategyId  = parseInt(req.params.strategyId);
