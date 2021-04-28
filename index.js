@@ -153,7 +153,7 @@ app.post('/backtests', (req, res) => {
 	});
 })
 
-// Listen for PATCH requests to /backtests/date to set a new date value in the backtest.
+// Listen for PATCH requests to /backtests/?/date to set a new date value in the backtest.
 app.patch('/backtests/:backtestId/date', (req, res) => {
   const backtestId = parseInt(req.params.backtestId);
 
@@ -182,7 +182,7 @@ app.patch('/backtests/:backtestId/date', (req, res) => {
   });
 })
 
-// Listen for PATCH requests to /backtests/date to set a new date value in the backtest.
+// Listen for PUT requests to /backtests/? to set a new date value in the backtest.
 app.put('/backtests/:backtestId', (req, res) => {
   const backtestId = parseInt(req.params.backtestId);
 
@@ -191,7 +191,7 @@ app.put('/backtests/:backtestId', (req, res) => {
   
   var  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
   
-  // Query constructor to update the backtest properties.
+  // Query constructor to update the backtest.
   pool.query(`
     UPDATE backtests
       SET
@@ -212,7 +212,7 @@ app.put('/backtests/:backtestId', (req, res) => {
         // Valid and successful request.
         res.send(row);
         const successRate = row[1][0].successRate;
-        // Send the new date as an event to the socket connection.
+        // Send the new backtest data as an event to the socket connection.
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
         payload = { backtestId, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
         io.emit("backtestUpdated", payload);
@@ -220,12 +220,13 @@ app.put('/backtests/:backtestId', (req, res) => {
   });
 })
 
+// Listen for put requests to /backtests/?/finalise to update the final state of the backtest in teh database.
 app.put('/backtests/:backtestId/finalise', (req, res) => {
   const backtestId = parseInt(req.params.backtestId);
 
   var  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
   
-  // Query constructor to update the backtest properties.
+  // Query constructor to update the backtest.
   pool.query(`
     UPDATE backtests
       SET
@@ -244,9 +245,9 @@ app.put('/backtests/:backtestId/finalise', (req, res) => {
   });
 })
 
-// Listen for GET requests to /backtests to get the current backtest properties.
+// Listen for GET requests to /backtests_settings to get the current backtest settings.
 app.get('/backtest_settings', (req, res) => {
-	// Query constructor to get the current the backtest date.
+	// Query constructor to get the current the backtest settings.
 	pool.query(`SELECT backtestSettings.*, strategies.strategyName FROM backtestSettings
               LEFT JOIN strategies ON (backtestSettings.strategyId=strategies.strategyId);`, (err, row) => {
 			if(err) {
@@ -254,7 +255,7 @@ app.get('/backtest_settings', (req, res) => {
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return the properties within an object wit the date formatted.
+				// Valid and successful request, return the properties within an object with the date formatted.
         data = row[0];
         data.startDate = moment(data.startDate);
         data.endDate = moment(data.endDate);
@@ -301,7 +302,7 @@ app.get('/backtest_settings/is_paused', (req, res) => {
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return thepaused state within an object.
+				// Valid and successful request, return the paused state within an object.
         data = row[0];
 				res.send(data);
 			}
@@ -334,7 +335,7 @@ app.patch('/backtest_settings/is_paused', (req, res) => {
  });
 })
 
-// Listen for PATCH requests to /backtests/is_paused to set the current pause state of the backtest.
+// Listen for PATCH requests to /backtest_settings/available to set the current availability of the backtesting platform.
 app.patch('/backtest_settings/available', (req, res) => {
 	// Query constructor to get the current the backtest date.
   const backtestOnline  = parseInt(req.body.backtestOnline);
@@ -364,9 +365,9 @@ app.patch('/backtest_settings/available', (req, res) => {
  });
 })
 
-// Listen for PATCH requests to /backtests/is_paused to set the current pause state of the backtest.
+// Listen for GET requests to /backtest_settings/available to get the current availability of the backtesting platform.
 app.get('/backtest_settings/available', (req, res) => {
-	// Query constructor to get the current the backtest date.
+	// Query constructor to get the current the backtest status.
   const backtestOnline  = parseInt(req.body.backtestOnline);
 
   if(backtestOnline === 0) {
@@ -388,12 +389,12 @@ app.get('/backtest_settings/available', (req, res) => {
  });
 })
 
-// Listen for PUT requests to /backtest_settings to the backtest settings.
+// Listen for PUT requests to /backtest_settings/strategy to set the strategy that is in use in the backtest.
 app.put('/backtest_settings/strategy', (req, res) => {
   // Extract data from request body.
   const { strategyId } = req.body;
   
-  // Query constructor to update the backtest settings.
+  // Query constructor to update the chosen strategy.
   pool.query(`
     UPDATE backtestSettings
       SET
@@ -410,7 +411,7 @@ app.put('/backtest_settings/strategy', (req, res) => {
   });
 })
 
-// Listen for POST requests to /trades to add a new trade to the open_trades table.
+// Listen for POST requests to /trades/? to add a new trade to the open_trades table under the given backtest.
 app.post('/trades/:backtestId', (req, res) => {
 
   const backtestId = parseInt(req.params.backtestId);
@@ -442,7 +443,7 @@ app.post('/trades/:backtestId', (req, res) => {
   });
 })
 
-// Listen for GET requests to /trades/stats to get the current trade statistics of the backtest from the date specified.
+// Listen for GET requests to /trades/?/stats to get the current trade statistics of the backtest from the date specified.
 app.get('/trades/:backtestId/stats', (req, res) => {
   const backtestId = parseInt(req.params.backtestId);
   const date = req.query.date;
@@ -503,7 +504,7 @@ app.get('/trades/:backtestId/stats', (req, res) => {
 	});
 })
 
-// Listen for GET requests to /trades to get the current trades for the specified backtest.
+// Listen for GET requests to /trades/? to get the current trades for the specified backtest.
 app.get('/trades/:backtestId', (req, res) => {
 
   const backtestId = parseInt(req.params.backtestId);
@@ -535,7 +536,7 @@ app.get('/trades/:backtestId', (req, res) => {
 	});
 })
 
-// Listen for PUT requests to /trades to update all open trades and send the closed ones to the closed trades table.
+// Listen for PUT requests to /trades/? to update all open trades and send the closed ones to the closed trades table.
 app.put('/trades/:backtestId', (req, res) => {
 
   const backtestId = parseInt(req.params.backtestId);
