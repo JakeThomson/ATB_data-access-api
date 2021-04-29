@@ -128,13 +128,13 @@ app.post('/backtests', (req, res) => {
 	var totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph)
 	// Query constructor to update the backtest properties.
 	pool.query(`
-    DELETE FROM backtests WHERE backtests.strategyId=? AND datetimeFinished is null;
+    DELETE FROM backtests WHERE datetimeFinished is null;
 		INSERT INTO backtests 
       (backtestDate, strategyId, datetimeStarted, active, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate)
     VALUES
       (?, ?, NOW(), 1, ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS backtestId;`, 
-		[strategyId, backtestDate, strategyId, totalBalance, availableBalance, totalProfitLoss, 
+		[backtestDate, strategyId, totalBalance, availableBalance, totalProfitLoss, 
 			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
@@ -146,7 +146,7 @@ app.post('/backtests', (req, res) => {
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { backtestId: row[2][0].backtestId, backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
+        payload = { backtestId: row[2][0].backtestId, strategyId, backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
         io.emit("backtestUpdated", payload);
         io.emit("tradesUpdated");
 			}
@@ -187,7 +187,7 @@ app.put('/backtests/:backtestId', (req, res) => {
   const backtestId = parseInt(req.params.backtestId);
 
   // Extract data from request body.
-  const { total_balance: totalBalance, available_balance: availableBalance, total_profit_loss: totalProfitLoss, total_profit_loss_pct: totalProfitLossPct } = req.body;
+  const { total_balance: totalBalance, strategy_id: strategyId, available_balance: availableBalance, total_profit_loss: totalProfitLoss, total_profit_loss_pct: totalProfitLossPct } = req.body;
   
   var  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
   
@@ -214,7 +214,7 @@ app.put('/backtests/:backtestId', (req, res) => {
         const successRate = row[1][0].successRate;
         // Send the new backtest data as an event to the socket connection.
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { backtestId, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
+        payload = { backtestId, strategyId, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
         io.emit("backtestUpdated", payload);
       }
   });
@@ -223,8 +223,6 @@ app.put('/backtests/:backtestId', (req, res) => {
 // Listen for put requests to /backtests/?/finalise to update the final state of the backtest in teh database.
 app.put('/backtests/:backtestId/finalise', (req, res) => {
   const backtestId = parseInt(req.params.backtestId);
-
-  var  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
   
   // Query constructor to update the backtest.
   pool.query(`
@@ -340,15 +338,14 @@ app.patch('/backtest_settings/available', (req, res) => {
 	// Query constructor to get the current the backtest date.
   const backtestOnline  = parseInt(req.body.backtestOnline);
 
-  if(backtestOnline === 0) {
-    backtestSocket = undefined;
-  }
-
   // Query constructor to update the backtest paused state.
   pool.query(`
+  UPDATE backtests
+      SET
+        active = 0;
   UPDATE backtestSettings
     SET
-      backtestOnline = ?`,
+      backtestOnline = ?;`,
   [backtestOnline], (err, row) => {
     if(err) {
       console.warn(new Date(), err);
