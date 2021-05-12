@@ -128,13 +128,13 @@ app.post('/backtests', (req, res) => {
 	var totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph)
 	// Query constructor to update the backtest properties.
 	pool.query(`
-    DELETE FROM backtests WHERE backtests.strategyId=? AND datetimeFinished is null;
+    DELETE FROM backtests WHERE datetimeFinished is null;
 		INSERT INTO backtests 
       (backtestDate, strategyId, datetimeStarted, active, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate)
     VALUES
-      (?, ?, CONVERT_TZ(NOW(),'SYSTEM','+1:00'), 1, ?, ?, ?, ?, ?, ?);
+      (?, ?, NOW(), 1, ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS backtestId;`, 
-		[strategyId, backtestDate, strategyId, totalBalance, availableBalance, totalProfitLoss, 
+		[backtestDate, strategyId, totalBalance, availableBalance, totalProfitLoss, 
 			totalProfitLossPct, totalProfitLossGraph, successRate], (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
@@ -146,14 +146,14 @@ app.post('/backtests', (req, res) => {
         // Send the new date as an event to the socket connection.
         formattedDate = moment(backtestDate).format('DD/MM/YYYY')
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { backtestId: row[2][0].backtestId, backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
+        payload = { backtestId: row[2][0].backtestId, strategyId, backtestDate: formattedDate, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate, tradeStats }
         io.emit("backtestUpdated", payload);
         io.emit("tradesUpdated");
 			}
 	});
 })
 
-// Listen for PATCH requests to /backtests/date to set a new date value in the backtest.
+// Listen for PATCH requests to /backtests/?/date to set a new date value in the backtest.
 app.patch('/backtests/:backtestId/date', (req, res) => {
   const backtestId = parseInt(req.params.backtestId);
 
@@ -182,16 +182,16 @@ app.patch('/backtests/:backtestId/date', (req, res) => {
   });
 })
 
-// Listen for PATCH requests to /backtests/date to set a new date value in the backtest.
+// Listen for PUT requests to /backtests/? to set a new date value in the backtest.
 app.put('/backtests/:backtestId', (req, res) => {
   const backtestId = parseInt(req.params.backtestId);
 
   // Extract data from request body.
-  const { total_balance: totalBalance, available_balance: availableBalance, total_profit_loss: totalProfitLoss, total_profit_loss_pct: totalProfitLossPct } = req.body;
+  const { total_balance: totalBalance, strategy_id: strategyId, available_balance: availableBalance, total_profit_loss: totalProfitLoss, total_profit_loss_pct: totalProfitLossPct } = req.body;
   
   var  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
   
-  // Query constructor to update the backtest properties.
+  // Query constructor to update the backtest.
   pool.query(`
     UPDATE backtests
       SET
@@ -200,10 +200,10 @@ app.put('/backtests/:backtestId', (req, res) => {
         totalProfitLoss = ?,
         totalProfitLossPct = ?,
         totalProfitLossGraph = ?,
-        successRate = IFNULL((SELECT (SUM(profitLoss >= 0)/count(*))*100 FROM closedTrades), 0)
+        successRate = IFNULL((SELECT (SUM(profitLoss >= 0)/count(*))*100 FROM closedTrades WHERE backtestId = ?), 0)
       WHERE backtestId = ?;
-        SELECT (SUM(profitLoss >= 0)/count(*))*100 AS 'successRate' FROM closedTrades;`,
-    [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, backtestId], (err, row) => {
+        SELECT (SUM(profitLoss >= 0)/count(*))*100 AS 'successRate' FROM closedTrades WHERE backtestId = ?;`,
+    [totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, backtestId, backtestId, backtestId], (err, row) => {
       if(err) {
         console.warn(new Date(), err);
         // If the MySQL query returned an error, pass the error message onto the client.
@@ -212,24 +212,23 @@ app.put('/backtests/:backtestId', (req, res) => {
         // Valid and successful request.
         res.send(row);
         const successRate = row[1][0].successRate;
-        // Send the new date as an event to the socket connection.
+        // Send the new backtest data as an event to the socket connection.
         totalProfitLossGraph = JSON.parse(totalProfitLossGraph);
-        payload = { backtestId, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
+        payload = { backtestId, strategyId, totalBalance, availableBalance, totalProfitLoss, totalProfitLossPct, totalProfitLossGraph, successRate }
         io.emit("backtestUpdated", payload);
       }
   });
 })
 
+// Listen for put requests to /backtests/?/finalise to update the final state of the backtest in teh database.
 app.put('/backtests/:backtestId/finalise', (req, res) => {
   const backtestId = parseInt(req.params.backtestId);
-
-  var  totalProfitLossGraph = JSON.stringify(req.body.total_profit_loss_graph);
   
-  // Query constructor to update the backtest properties.
+  // Query constructor to update the backtest.
   pool.query(`
     UPDATE backtests
       SET
-        datetimeFinished = CONVERT_TZ(NOW(),'SYSTEM','+1:00'),
+        datetimeFinished = NOW(),
         active = 0
       WHERE backtestId = ?;`,
     [backtestId], (err, row) => {
@@ -244,9 +243,9 @@ app.put('/backtests/:backtestId/finalise', (req, res) => {
   });
 })
 
-// Listen for GET requests to /backtests to get the current backtest properties.
+// Listen for GET requests to /backtests_settings to get the current backtest settings.
 app.get('/backtest_settings', (req, res) => {
-	// Query constructor to get the current the backtest date.
+	// Query constructor to get the current the backtest settings.
 	pool.query(`SELECT backtestSettings.*, strategies.strategyName FROM backtestSettings
               LEFT JOIN strategies ON (backtestSettings.strategyId=strategies.strategyId);`, (err, row) => {
 			if(err) {
@@ -254,7 +253,7 @@ app.get('/backtest_settings', (req, res) => {
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return the properties within an object wit the date formatted.
+				// Valid and successful request, return the properties within an object with the date formatted.
         data = row[0];
         data.startDate = moment(data.startDate);
         data.endDate = moment(data.endDate);
@@ -301,7 +300,7 @@ app.get('/backtest_settings/is_paused', (req, res) => {
 				// If the MySQL query returned an error, pass the error message onto the client.
 				res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
 			} else {
-				// Valid and successful request, return thepaused state within an object.
+				// Valid and successful request, return the paused state within an object.
         data = row[0];
 				res.send(data);
 			}
@@ -334,20 +333,19 @@ app.patch('/backtest_settings/is_paused', (req, res) => {
  });
 })
 
-// Listen for PATCH requests to /backtests/is_paused to set the current pause state of the backtest.
+// Listen for PATCH requests to /backtest_settings/available to set the current availability of the backtesting platform.
 app.patch('/backtest_settings/available', (req, res) => {
 	// Query constructor to get the current the backtest date.
   const backtestOnline  = parseInt(req.body.backtestOnline);
 
-  if(backtestOnline === 0) {
-    backtestSocket = undefined;
-  }
-
   // Query constructor to update the backtest paused state.
   pool.query(`
+  UPDATE backtests
+      SET
+        active = 0;
   UPDATE backtestSettings
     SET
-      backtestOnline = ?`,
+      backtestOnline = ?;`,
   [backtestOnline], (err, row) => {
     if(err) {
       console.warn(new Date(), err);
@@ -364,12 +362,36 @@ app.patch('/backtest_settings/available', (req, res) => {
  });
 })
 
-// Listen for PUT requests to /backtest_settings to the backtest settings.
+// Listen for GET requests to /backtest_settings/available to get the current availability of the backtesting platform.
+app.get('/backtest_settings/available', (req, res) => {
+	// Query constructor to get the current the backtest status.
+  const backtestOnline  = parseInt(req.body.backtestOnline);
+
+  if(backtestOnline === 0) {
+    backtestSocket = undefined;
+  }
+
+  // Query constructor to update the backtest paused state.
+  pool.query(`
+  SELECT backtestOnline FROM backtestSettings;`,
+  [backtestOnline], (err, row) => {
+    if(err) {
+      console.warn(new Date(), err);
+      // If the MySQL query returned an error, pass the error message onto the client.
+      res.status(500).send({devErrorMsg: err.sqlMessage, clientErrorMsg: "Internal server error."});
+    } else {
+      // Valid and successful request.
+      res.send(row[0]);
+    }
+ });
+})
+
+// Listen for PUT requests to /backtest_settings/strategy to set the strategy that is in use in the backtest.
 app.put('/backtest_settings/strategy', (req, res) => {
   // Extract data from request body.
   const { strategyId } = req.body;
   
-  // Query constructor to update the backtest settings.
+  // Query constructor to update the chosen strategy.
   pool.query(`
     UPDATE backtestSettings
       SET
@@ -386,7 +408,7 @@ app.put('/backtest_settings/strategy', (req, res) => {
   });
 })
 
-// Listen for POST requests to /trades to add a new trade to the open_trades table.
+// Listen for POST requests to /trades/? to add a new trade to the open_trades table under the given backtest.
 app.post('/trades/:backtestId', (req, res) => {
 
   const backtestId = parseInt(req.params.backtestId);
@@ -395,15 +417,16 @@ app.post('/trades/:backtestId', (req, res) => {
     current_price: currentPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct } = req.body;
   
   const figure = JSON.stringify(req.body.figure);
+  const simpleFigure = JSON.stringify(req.body.simpleFigure);
 
   // Query constructor to send a new trade to openTrades.
 	pool.query(`
     INSERT INTO openTrades
-      (backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct)
+      (backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, simpleFigure, profitLossPct)
     VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     SELECT LAST_INSERT_ID() AS trade_id;`, 
-  [backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, profitLossPct], (err, row) => {
+  [backtestId, ticker, buyDate, shareQty, investmentTotal, buyPrice, currentPrice, takeProfit, stopLoss, figure, simpleFigure, profitLossPct], (err, row) => {
     if(err) {
       console.warn(new Date(), err);
       // If the MySQL query returned an error, pass the error message onto the client.
@@ -417,8 +440,9 @@ app.post('/trades/:backtestId', (req, res) => {
   });
 })
 
-// Listen for GET requests to /trades/stats to get the current trade statistics of the backtest from the date specified.
-app.get('/trades/stats', (req, res) => {
+// Listen for GET requests to /trades/?/stats to get the current trade statistics of the backtest from the date specified.
+app.get('/trades/:backtestId/stats', (req, res) => {
+  const backtestId = parseInt(req.params.backtestId);
   const date = req.query.date;
 
   if(date === undefined) {
@@ -426,28 +450,33 @@ app.get('/trades/stats', (req, res) => {
     res.status(400).send("Invalid query.");
   }
 
-  const sqlParamArray = Array(8).fill(date);
+  var sqlParamArray = [];
+  for (var i = 0; i < 8; i++) {
+    sqlParamArray.push(backtestId);
+    sqlParamArray.push(date);
+  }
+  sqlParamArray.push(backtestId);
 	// Query constructor to get all current backtest stats.
 	pool.query(`
     SELECT *
       FROM closedTrades
-        WHERE profitLossPct = (SELECT MAX(profitLossPct) FROM closedTrades WHERE profitLoss > 0 AND sellDate >= ?);
+        WHERE profitLossPct = (SELECT MAX(profitLossPct) FROM closedTrades WHERE backtestId=? AND profitLoss > 0 AND sellDate >= ?);
     SELECT *
       FROM closedTrades
-        WHERE profitLossPct = (SELECT MIN(profitLossPct) FROM closedTrades WHERE profitLoss < 0 AND sellDate >= ?);
+        WHERE profitLossPct = (SELECT MIN(profitLossPct) FROM closedTrades WHERE backtestId=? AND profitLoss < 0 AND sellDate >= ?);
     SELECT AVG(profitLossPct) AS avgProfitPct
       FROM closedTrades
-        WHERE profitLossPct > 0 AND sellDate >= ?;
+        WHERE backtestId=? AND profitLossPct > 0 AND sellDate >= ?;
     SELECT AVG(profitLossPct) AS avgLossPct
       FROM closedTrades
-        WHERE profitLossPct < 0 AND sellDate >= ?;
+        WHERE backtestId=? AND profitLossPct < 0 AND sellDate >= ?;
     SELECT AVG(profitLossPct) as avgProfitLossPct
       FROM closedTrades
-        WHERE sellDate > ?;
-    SELECT (SELECT COUNT(profitLoss) FROM closedTrades WHERE profitLoss > 0 AND sellDate >= ?)/
-          (SELECT COUNT(profitLoss) FROM closedTrades WHERE profitLoss < 0 AND sellDate >= ?) AS profitFactor;
-    SELECT (SELECT SUM(profitLoss) FROM closedTrades WHERE sellDate >= ?)/
-          (SELECT COUNT(profitLoss) FROM closedTrades) * 100 AS totalProfitLoss;`,
+        WHERE backtestId=? AND sellDate > ?;
+    SELECT (SELECT COUNT(profitLoss) FROM closedTrades WHERE backtestId=? AND profitLoss > 0 AND sellDate >= ?)/
+          (SELECT COUNT(profitLoss) FROM closedTrades WHERE backtestId=? AND profitLoss < 0 AND sellDate >= ?) AS profitFactor;
+    SELECT (SELECT SUM(profitLoss) FROM closedTrades WHERE backtestId=? AND sellDate >= ?)/
+          (SELECT COUNT(profitLoss) FROM closedTrades WHERE  backtestId=?) * 100 AS totalProfitLoss;`,
           sqlParamArray, (err, row) => {
 			if(err) {
 				console.warn(new Date(), err);
@@ -457,10 +486,12 @@ app.get('/trades/stats', (req, res) => {
         // Format results into a usable object to be sent to the client.
         const highestProfitTrade = row[0][0];
         if(highestProfitTrade !== undefined){
+          highestProfitTrade.simpleFigure = JSON.parse(JSON.parse(highestProfitTrade.simpleFigure));
           highestProfitTrade.figure = JSON.parse(JSON.parse(highestProfitTrade.figure));
         }
         const highestLossTrade = row[1][0];
         if(highestLossTrade !== undefined){
+          highestLossTrade.simpleFigure = JSON.parse(JSON.parse(highestLossTrade.simpleFigure));
           highestLossTrade.figure = JSON.parse(JSON.parse(highestLossTrade.figure));
         }
 				const data = {highestProfitTrade, highestLossTrade, avgProfitPct: row[2][0].avgProfitPct, avgLossPct: row[3][0].avgLossPct, 
@@ -470,7 +501,7 @@ app.get('/trades/stats', (req, res) => {
 	});
 })
 
-// Listen for GET requests to /trades to get the current trades for the specified backtest.
+// Listen for GET requests to /trades/? to get the current trades for the specified backtest.
 app.get('/trades/:backtestId', (req, res) => {
 
   const backtestId = parseInt(req.params.backtestId);
@@ -490,9 +521,11 @@ app.get('/trades/:backtestId', (req, res) => {
         data = [row[0], row[1]]
         // Separate and parse the two results for the UI to easily use.
         for(i=0; i<data[0].length; i++) {
+          data[0][i].simpleFigure = JSON.parse(JSON.parse(data[0][i].simpleFigure))
           data[0][i].figure = JSON.parse(JSON.parse(data[0][i].figure))
         }
         for(i=0; i<data[1].length; i++) {
+          data[1][i].simpleFigure = JSON.parse(JSON.parse(data[1][i].simpleFigure))
           data[1][i].figure = JSON.parse(JSON.parse(data[1][i].figure))
         }
 				res.send(data);
@@ -500,7 +533,7 @@ app.get('/trades/:backtestId', (req, res) => {
 	});
 })
 
-// Listen for PUT requests to /trades to update all open trades and send the closed ones to the closed trades table.
+// Listen for PUT requests to /trades/? to update all open trades and send the closed ones to the closed trades table.
 app.put('/trades/:backtestId', (req, res) => {
 
   const backtestId = parseInt(req.params.backtestId);
@@ -514,10 +547,11 @@ app.put('/trades/:backtestId', (req, res) => {
   // Generate MySQL query string and inputs, to allow the backtest to update all required trades in the openTrades table.
   openTrades.forEach(trade => {
     const {trade_id: tradeId, current_price: currentPrice, profit_loss_pct: profitLossPct} = trade;
+    const simpleFigure = JSON.stringify(trade.simpleFigure);
     const figure = JSON.stringify(trade.figure);
     // Query constructor to update the open trades.
-    pool.query("UPDATE openTrades SET currentPrice = ?, figure = ?, profitLossPct= ? WHERE tradeId = ?;",
-    [currentPrice, figure, profitLossPct, tradeId], (err, row) => {
+    pool.query("UPDATE openTrades SET currentPrice = ?, simpleFigure = ?, figure = ?, profitLossPct = ? WHERE tradeId = ?;",
+    [currentPrice, simpleFigure, figure, profitLossPct, tradeId], (err, row) => {
         if(err) {
           console.warn(new Date(), err);
           // If the MySQL query returned an error, pass the error message onto the client.
@@ -534,17 +568,18 @@ app.put('/trades/:backtestId', (req, res) => {
     const {trade_id: tradeId, ticker, buy_date: buyDate, sell_date: sellDate, share_qty: shareQty, investment_total: investmentTotal, profit_loss: profitLoss,
       buy_price: buyPrice, sell_price: sellPrice, take_profit: takeProfit, stop_loss: stopLoss, profit_loss_pct: profitLossPct} = trade;
     const figure = JSON.stringify(trade.figure);
+    const simpleFigure = JSON.stringify(trade.simpleFigure);
     // Query constructor to update the open trades.
     pool.query(`
       LOCK TABLES
         openTrades write,
         closedTrades write;
       INSERT INTO closedTrades (tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, 
-        sellPrice, takeProfit, stopLoss, figure, profitLossPct)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        sellPrice, takeProfit, stopLoss, figure, simpleFigure, profitLossPct)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
       DELETE FROM openTrades WHERE tradeId = ?;
       UNLOCK TABLES;`, 
-      [tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, sellPrice, takeProfit, stopLoss, figure, profitLossPct, tradeId], (err, row) => {
+      [tradeId, backtestId, ticker, buyDate, sellDate, shareQty, investmentTotal, profitLoss, buyPrice, sellPrice, takeProfit, stopLoss, figure, simpleFigure, profitLossPct, tradeId], (err, row) => {
       if(err) {
         console.warn(new Date(), err);
         // If the MySQL query returned an error, pass the error message onto the client.
@@ -685,7 +720,7 @@ app.post('/strategies', (req, res) => {
   // Convert json object into json string that can be accepted by the database.
   strategyData = JSON.stringify(strategyData)
 
-  // Query constructor to send a new strategu to the database.
+  // Query constructor to send a new strategy to the database.
 	pool.query(`
     INSERT INTO strategies
       (strategyName, technicalAnalysis, lookbackRangeWeeks, maxWeekPeriod)
@@ -704,7 +739,7 @@ app.post('/strategies', (req, res) => {
   });
 })
 
-// Listen for GET requests to /strategies/:strategyId to get information on a specific strategy.
+// Listen for GET requests to /strategies/? to get information on a specific strategy.
 app.get('/strategies/:strategyId', (req, res) => {
   const strategyId = req.params.strategyId;
 
@@ -725,7 +760,7 @@ app.get('/strategies/:strategyId', (req, res) => {
 	});
 })
 
-// Listen for PUT requests to /strategies/:strategyId and update the specified strategy.
+// Listen for PUT requests to /strategies/? and update the specified strategy.
 app.put('/strategies/:strategyId', (req, res) => {
 
   // Extract data from request body.
@@ -754,7 +789,7 @@ app.put('/strategies/:strategyId', (req, res) => {
 	});
 })
 
-// Listen for DELETE requests to /strategies and delete the specified entry in the table.
+// Listen for DELETE requests to /strategies? and delete the specified entry in the table.
 app.delete('/strategies/:strategyId', (req, res) => {
   // Extract data from route parameter.
   const strategyId  = parseInt(req.params.strategyId);
